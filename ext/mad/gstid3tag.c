@@ -793,10 +793,12 @@ gst_id3_tag_sink_event (GstPad * pad, GstEvent * event)
     case GST_EVENT_DISCONTINUOUS:
       switch (tag->state) {
         case GST_ID3_TAG_STATE_READING_V2_TAG:{
-          guint64 value;
+          guint64 value, end_value;
 
-          if (gst_event_discont_get_value (event, GST_FORMAT_BYTES, &value) ||
-              gst_event_discont_get_value (event, GST_FORMAT_DEFAULT, &value)) {
+          if (gst_event_discont_get_value (event, GST_FORMAT_BYTES, &value,
+                  &end_value)
+              || gst_event_discont_get_value (event, GST_FORMAT_DEFAULT, &value,
+                  &end_value)) {
             if (value !=
                 (tag->buffer ? GST_BUFFER_OFFSET (tag->buffer) +
                     GST_BUFFER_SIZE (tag->buffer)
@@ -836,10 +838,11 @@ gst_id3_tag_sink_event (GstPad * pad, GstEvent * event)
             /* fall through */
           }
         case GST_ID3_TAG_STATE_NORMAL:{
-          gint64 value;
+          gint64 value, end_value;
           GstEvent *new;
 
-          if (gst_event_discont_get_value (event, GST_FORMAT_BYTES, &value)) {
+          if (gst_event_discont_get_value (event, GST_FORMAT_BYTES, &value,
+                  &end_value)) {
             if (value > tag->v2tag_size) {
               value -= tag->v2tag_size;
             } else {

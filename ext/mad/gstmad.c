@@ -909,7 +909,9 @@ gst_mad_sink_event (GstPad * pad, GstEvent * event)
 
         if (gst_formats_contains (formats, GST_EVENT_DISCONT_OFFSET (event,
                     i).format)) {
-          gint64 value = GST_EVENT_DISCONT_OFFSET (event, i).value;
+          gint64 start_value = GST_EVENT_DISCONT_OFFSET (event, i).start_value;
+
+          //gint64 end_value = GST_EVENT_DISCONT_OFFSET (event, i).end_value;
           gint64 time;
           GstFormat format;
           GstEvent *discont;
@@ -919,11 +921,11 @@ gst_mad_sink_event (GstPad * pad, GstEvent * event)
             format = GST_FORMAT_TIME;
             if (!gst_pad_convert (pad,
                     GST_EVENT_DISCONT_OFFSET (event, i).format,
-                    value, &format, &time)) {
+                    start_value, &format, &time)) {
               continue;
             }
           } else {
-            time = value;
+            time = start_value;
           }
 
           /* for now, this is the best we can do to get the total number
