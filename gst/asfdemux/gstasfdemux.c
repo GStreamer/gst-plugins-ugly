@@ -115,7 +115,7 @@ gst_asf_demux_base_init (gpointer g_class)
 {
   GstElementClass *element_class = GST_ELEMENT_CLASS (g_class);
   int i;
-  GstCaps2 *audcaps = NULL, *vidcaps = NULL, *temp;
+  GstCaps2 *audcaps, *vidcaps, *temp;
   guint32 vid_list[] = {
     GST_MAKE_FOURCC('I','4','2','0'),
     GST_MAKE_FOURCC('Y','U','Y','2'),
@@ -142,6 +142,7 @@ gst_asf_demux_base_init (gpointer g_class)
     -1 /* end */
   };
 
+  audcaps = gst_caps2_new_empty();
   for (i = 0; aud_list[i] != -1; i++) {
     temp = gst_asf_demux_audio_caps (aud_list[i], NULL, NULL);
     gst_caps2_append (audcaps, temp);
@@ -150,7 +151,9 @@ gst_asf_demux_base_init (gpointer g_class)
   audiosrctempl = gst_pad_template_new ("audio_%02d",
 					GST_PAD_SRC,
 				        GST_PAD_SOMETIMES,
-					audcaps, NULL);
+					audcaps);
+
+  vidcaps = gst_caps2_new_empty();
   for (i = 0; vid_list[i] != 0; i++) {
     temp = gst_asf_demux_video_caps (vid_list[i], NULL);
     gst_caps2_append (vidcaps, temp);
@@ -159,7 +162,7 @@ gst_asf_demux_base_init (gpointer g_class)
   videosrctempl = gst_pad_template_new ("video_%02d",
 					GST_PAD_SRC,
 				      	GST_PAD_SOMETIMES,
-					vidcaps, NULL);
+					vidcaps);
   gst_element_class_add_pad_template (element_class, audiosrctempl);
   gst_element_class_add_pad_template (element_class, videosrctempl);
   gst_element_class_add_pad_template (element_class, 
@@ -1257,12 +1260,12 @@ gst_asf_demux_audio_caps (guint16 codec_id,
       break;
 
     case GST_RIFF_WAVE_FORMAT_MPEGL12: /* mp1 or mp2 */
-      caps = gst_caps2_from_string("audio/mpeg, layer = (int) 2");
+      caps = gst_caps2_from_string ("audio/mpeg, layer = (int) 2");
       break;
 
     case GST_RIFF_WAVE_FORMAT_PCM: /* PCM/wav */ {
-      caps = gst_caps2_from_string("audio/x-raw-int, "
-	  "endianness = (int) " G_STRINGIFY(G_LITTLE_ENDIAN) ","
+      caps = gst_caps2_from_string ("audio/x-raw-int, "
+	  "endianness = (int) LITTLE_ENDIAN,"
 	  "signed = (boolean) { true, false }, "
 	  "width = (int) { 8, 16 }, "
 	  "depth = (int) { 8, 16 }");
@@ -1302,12 +1305,10 @@ gst_asf_demux_audio_caps (guint16 codec_id,
       }
       caps = gst_caps2_from_string("audio/x-wma, "
 	  "wmaversion = (int) 1, "
-	  "flags1 = (int) [ " G_STRINGIFY(G_MININT) ", "
-	    G_STRINGIFY(G_MAXINT) "], "
-	  "flags2 = (int) [ " G_STRINGIFY(G_MININT) ", "
-	    G_STRINGIFY(G_MAXINT) "], "
-	  "block_align = (int) [ 0, " G_STRINGIFY(G_MAXINT) "], "
-	  "bitrate = (int) [ 0, " G_STRINGIFY(G_MAXINT) "]");
+	  "flags1 = (int) [ MIN, MAX ], "
+	  "flags2 = (int) [ MIN, MAX ], "
+	  "block_align = (int) [ 0, MAX ], "
+	  "bitrate = (int) [ 0, MAX ]");
       if (audio != NULL) {
 	gst_caps2_set_simple (caps,
 	    "flags1", G_TYPE_INT, flags1,
@@ -1327,12 +1328,10 @@ gst_asf_demux_audio_caps (guint16 codec_id,
       }
       caps = gst_caps2_from_string("audio/x-wma, "
 	  "wmaversion = (int) 2, "
-	  "flags1 = (int) [ " G_STRINGIFY(G_MININT) ", "
-	    G_STRINGIFY(G_MAXINT) "], "
-	  "flags2 = (int) [ " G_STRINGIFY(G_MININT) ", "
-	    G_STRINGIFY(G_MAXINT) "], "
-	  "block_align = (int) [ 0, " G_STRINGIFY(G_MAXINT) "], "
-	  "bitrate = (int) [ 0, " G_STRINGIFY(G_MAXINT) "]");
+	  "flags1 = (int) [ MIN, MAX ], "
+	  "flags2 = (int) [ MIN, MAX ], "
+	  "block_align = (int) [ 0, MAX ], "
+	  "bitrate = (int) [ 0, MAX ]");
       if (audio != NULL) {
 	gst_caps2_set_simple (caps,
 	    "flags1", G_TYPE_INT, flags1,
@@ -1463,7 +1462,7 @@ gst_asf_demux_video_caps (guint32 codec_fcc,
     case GST_MAKE_FOURCC('I','4','2','0'):
     case GST_MAKE_FOURCC('Y','U','Y','2'):
       caps = gst_caps2_new_simple ("video/x-raw-yuv",
-	  "format", GST_TYPE_FOURCC, codec_fcc);
+	  "format", GST_TYPE_FOURCC, codec_fcc, NULL);
       break;
 
     case GST_MAKE_FOURCC('M','J','P','G'):
@@ -1534,7 +1533,7 @@ gst_asf_demux_video_caps (guint32 codec_fcc,
     gst_caps2_set_simple (caps,
 	"width", GST_TYPE_INT_RANGE, 1, G_MAXINT,
 	"height", GST_TYPE_INT_RANGE, 1, G_MAXINT,
-        "framerate", GST_TYPE_DOUBLE_RANGE, 0, G_MAXDOUBLE,
+        "framerate", GST_TYPE_DOUBLE_RANGE, 0.0, G_MAXDOUBLE,
 	NULL);
   }
 
