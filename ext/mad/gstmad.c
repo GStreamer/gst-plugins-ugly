@@ -32,6 +32,9 @@
   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_MAD))
 #define GST_IS_MAD_CLASS(obj) \
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_MAD))
+  
+/* some defines wrt VBRs */
+#define GST_MAD_CHECK_LENGTH 300  /* check length every many frames */
 
 typedef struct _GstMad GstMad;
 typedef struct _GstMadClass GstMadClass;
@@ -48,7 +51,7 @@ struct _GstMad {
   struct mad_synth synth;
   guchar *tempbuffer;
   glong tempsize;
-  gboolean need_sync;
+  gboolean need_flush;
   guint64 last_time;
   guint64 framestamp;	/* timestamp-like, but counted in frames */
   guint64 sync_point; 
@@ -61,6 +64,9 @@ struct _GstMad {
   guint framecount;
   gint vbr_average; /* average bitrate */
   gulong vbr_rate; /* average * framecount */
+  
+  /* length */
+  GstEventLength *length;
 
   /* caps */
   gboolean caps_set;
@@ -138,11 +144,12 @@ static void		gst_mad_set_property	(GObject *object, guint prop_id,
 static void		gst_mad_get_property	(GObject *object, guint prop_id, 
 						 GValue *value, GParamSpec *pspec);
 
-static void 		gst_mad_chain 		(GstPad *pad, GstBuffer *buffer);
+static void 		gst_mad_chain 		(GstPad *pad, GstData *data);
 
 static GstElementStateReturn
-			gst_mad_change_state (GstElement *element);
-
+			gst_mad_change_state 	(GstElement *element);
+static gpointer 	gst_mad_srcpad_event 	(GstPad *pad, GstData *event);
+static GstEventLength *	gst_mad_new_length_event (GstEventLength *length);
 
 static GstElementClass *parent_class = NULL;
 /* static guint gst_mad_signals[LAST_SIGNAL] = { 0 }; */
@@ -228,10 +235,11 @@ gst_mad_init (GstMad *mad)
   mad->srcpad = gst_pad_new_from_template(
 		  GST_PADTEMPLATE_GET (mad_src_template_factory), "src");
   gst_element_add_pad(GST_ELEMENT(mad),mad->srcpad);
+  gst_pad_set_event_function (mad->srcpad, gst_mad_srcpad_event);
 
   mad->tempbuffer = g_malloc (MAD_BUFFER_MDLEN * 3);
   mad->tempsize = 0;
-  mad->need_sync = TRUE;
+  mad->need_flush = FALSE;
   mad->last_time = 0;
   mad->framestamp = 0;
   mad->total_samples = 0;
@@ -240,6 +248,10 @@ gst_mad_init (GstMad *mad)
   mad->framecount = 0;
   mad->vbr_average = 0;
   mad->vbr_rate = 0;
+  mad->length = NULL;
+  
+  /* hey, we can handle events */
+  GST_FLAG_SET (mad, GST_ELEMENT_EVENT_AWARE);
 }
 
 static void
@@ -247,9 +259,12 @@ gst_mad_dispose (GObject *object)
 {
   GstMad *mad = GST_MAD (object);
 
+  g_free (mad->tempbuffer);
+  if (mad->length != NULL)
+    gst_data_unref (GST_DATA (mad->length));
+    
   G_OBJECT_CLASS (parent_class)->dispose (object);
 
-  g_free (mad->tempbuffer);
 }
 
 static inline signed int 
@@ -322,6 +337,7 @@ gst_mad_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec 
       break;
   }
 }
+/* must only be called from the chain function, this function calls gst_pad_push */
 static void
 gst_mad_update_info (GstMad *mad, struct mad_header const *header)
 {
@@ -365,24 +381,133 @@ G_STMT_START{							\
   
   g_object_thaw_notify (G_OBJECT (mad));
   
+  /* see if we shoould update the length */
+  if (((mad->framecount % GST_MAD_CHECK_LENGTH) == 0 || mad->framecount == 1) && mad->length && mad->length->accuracy[GST_OFFSET_TIME] != GST_ACCURACY_SURE)
+  {
+    GstEventLength *temp = gst_mad_new_length_event (mad->length);
+    gst_data_unref (GST_DATA (mad->length));
+    mad->length = temp;
+    mad->length->length[GST_OFFSET_TIME] = mad->length->length[GST_OFFSET_BYTES] * 8000000 / mad->vbr_average;
+    mad->length->accuracy[GST_OFFSET_TIME] = (header->bitrate == mad->vbr_average) ? GST_ACCURACY_SURE : GST_ACCURACY_WILD_GUESS;
+    if (GST_PAD_IS_CONNECTED (mad->srcpad))
+    {
+      gst_data_ref (GST_DATA (mad->length));
+      gst_pad_push (mad->srcpad, GST_DATA (mad->length));
+    }
+  }
+  
 #undef CHECK_HEADER
 }
-
 static void
-gst_mad_chain (GstPad *pad, GstBuffer *buffer)
+gst_mad_instream_event (GstMad *mad, GstData *event)
+{
+  GstEventLength *length;
+  
+  switch (GST_DATA_TYPE (event))
+  {
+    case GST_EVENT_NEWMEDIA:
+      /* reset everything */
+      mad->last_time = 0;
+      mad->framestamp = 0;
+      mad->total_samples = 0;
+      mad->sync_point = 0;
+      mad->new_header = TRUE;
+      mad->framecount = 0;
+      mad->vbr_average = 0;
+      mad->vbr_rate = 0;
+      mad->tempsize = 0;
+      if (mad->length)
+      {
+	gst_data_unref (GST_DATA (mad->length));
+        mad->length = NULL;
+      }
+      break;
+    case GST_EVENT_DISCONTINUOUS:
+      /* reset some stuff */
+      mad->tempsize = 0;
+      mad->total_samples = 0;
+      if (event->offset[GST_OFFSET_TIME] > 0)
+      {
+        mad->sync_point = event->offset[GST_OFFSET_TIME];
+      } else {
+	GstEventDiscontinuous *new_event = gst_event_new_discontinuous ();
+	mad->sync_point = event->offset[GST_OFFSET_BYTES] * 8000000 / (mad->vbr_average > 0 ? mad->vbr_average : 1);
+	gst_event_copy_discontinuous (new_event, event);
+	GST_DATA (new_event)->offset[GST_OFFSET_TIME] = mad->sync_point;
+	gst_data_unref (event);
+	event = GST_DATA (new_event);
+      }
+      break;
+    case GST_EVENT_LENGTH:
+      length = GST_EVENT_LENGTH (event);
+      if (mad->length == NULL || length->accuracy[GST_OFFSET_BYTES] > mad->length->accuracy[GST_OFFSET_BYTES])
+      {
+	if (mad->length != NULL)
+	  gst_data_unref (GST_DATA (mad->length));
+	  
+	/* if the event knows the length, we gladly accept that, else we compute our own */
+	if (length->accuracy[GST_OFFSET_TIME] != GST_ACCURACY_SURE && mad->vbr_average > 0)
+	{
+	  /* create new event with better time info */
+	  GstEventLength *new_length = gst_mad_new_length_event (length);
+	  new_length->length[GST_OFFSET_TIME] = mad->length->length[GST_OFFSET_BYTES] * 8000000 / mad->vbr_average;
+          new_length->accuracy[GST_OFFSET_TIME] = ((mad->vbr_average == mad->header.bitrate) && (mad->framecount >= GST_MAD_CHECK_LENGTH)
+			      ? GST_ACCURACY_SURE : GST_ACCURACY_WILD_GUESS);
+	  
+	  gst_data_ref (GST_DATA (new_length));
+	  mad->length = new_length;
+	  gst_data_unref (event);
+	} else {
+  	  gst_data_ref (GST_DATA (length));
+	  mad->length = length;
+	}
+	event = GST_DATA (mad->length);
+      }
+      break;
+    case GST_EVENT_EOS:
+      gst_element_set_eos (GST_ELEMENT (mad));
+      break;
+    default:
+      break;
+  }
+  
+  if (GST_PAD_IS_CONNECTED (mad->srcpad))
+    gst_pad_push (mad->srcpad, event);
+  else
+    gst_data_unref (event);
+}
+static void
+gst_mad_chain (GstPad *pad, GstData *dat)
 {
   GstMad *mad;
   gchar *data;
   glong size;
+  GstBuffer *buffer;
 
   mad = GST_MAD (gst_pad_get_parent (pad));
-
+  buffer = GST_BUFFER (dat);
+  
+  /* need to flush? */
+  if (mad->need_flush)
+  {
+    mad->tempsize = 0;
+    mad->need_flush = FALSE;
+  }
+  
   /* end of new bit */
   data = GST_BUFFER_DATA (buffer);
   size = GST_BUFFER_SIZE (buffer);
 
-  if (!GST_PAD_IS_CONNECTED (mad->srcpad)) {
-    gst_buffer_unref (buffer);
+  /* is this an event? */
+  if (GST_IS_EVENT (dat))
+  {
+    gst_mad_instream_event (mad, dat);
+    return;
+  }
+  
+  if (!GST_PAD_IS_CONNECTED (mad->srcpad))
+  {
+    gst_data_unref (dat);
     return;
   }
 
@@ -444,9 +569,10 @@ gst_mad_chain (GstPad *pad, GstBuffer *buffer)
           mad->sync_point = GST_BUFFER_TIMESTAMP (buffer);
 	  mad->total_samples = 0;
 	}
+      } else {
+        GST_BUFFER_TIMESTAMP (outbuffer) = mad->sync_point + 
+					   mad->total_samples * 1000000LL / mad->frame.header.samplerate;
       }
-      GST_BUFFER_TIMESTAMP (outbuffer) = mad->sync_point + 
-	      				 mad->total_samples * 1000000LL / mad->frame.header.samplerate;
 
       /* end of new bit */
       while (nsamples--) {
@@ -481,7 +607,12 @@ gst_mad_chain (GstPad *pad, GstBuffer *buffer)
         mad->caps_set = TRUE;
       }
 
-      gst_pad_push (mad->srcpad, outbuffer);
+      gst_pad_push (mad->srcpad, GST_DATA (outbuffer));
+      if (mad->need_flush)
+      {
+	gst_data_unref (dat);
+	return;
+      }
 next:
       /* figure out how many bytes mad consumed */
       consumed = mad->stream.next_frame - mad_input_buffer;
@@ -493,7 +624,7 @@ next:
     memmove (mad->tempbuffer, mad_input_buffer, mad->tempsize);
   }
 
-  gst_buffer_unref (buffer);
+  gst_data_unref (dat);
 }
 
 static GstElementStateReturn
@@ -529,6 +660,66 @@ gst_mad_change_state (GstElement *element)
   parent_class->change_state (element);
 
   return GST_STATE_SUCCESS;
+}
+
+static gpointer
+gst_mad_srcpad_event (GstPad *pad, GstData *event)
+{
+  GstEventSeek *seek;
+  gpointer ret = NULL;
+  GstMad *mad = GST_MAD (GST_PAD_PARENT (pad));
+  GstPad *nextpad = GST_PAD_CAST (GST_RPAD_PEER (mad->sinkpad));
+  
+  switch (GST_DATA_TYPE (event))
+  {
+    case GST_EVENT_SEEK:
+      seek = (GstEventSeek *) event;
+      /* check if we can provide better seek info than the event */
+      if (seek->accuracy[GST_OFFSET_TIME] > GST_ACCURACY_NONE && seek->accuracy[GST_OFFSET_BYTES] != GST_ACCURACY_SURE)
+      {
+	GstEventSeek *new_event = NULL;
+	if ((new_event = gst_event_new_seek (seek->type, seek->original, 0, seek->flush)) == NULL)
+	{
+          gst_data_unref (event);
+	  g_warning ("couldn't create seek event, skipping seek - out of memory?\n");
+	  return NULL;
+	}	
+	/* copy all info from the old event */
+	gst_event_copy_seek (new_event, seek);
+	/* set the info from ourselves */
+	new_event->accuracy[GST_OFFSET_BYTES] = ((mad->vbr_average == mad->header.bitrate) && (mad->framecount >= GST_MAD_CHECK_LENGTH)
+					      ? GST_ACCURACY_SURE : GST_ACCURACY_GUESS);
+	new_event->offset[GST_OFFSET_BYTES] = seek->offset[GST_OFFSET_TIME] * mad->vbr_average / 8000000;
+        if ((ret = gst_pad_send_event (nextpad, GST_DATA (new_event))) != NULL)
+        {
+          mad->need_flush |= seek->flush;
+        }
+        gst_data_unref (event);
+	return ret;
+      }
+      break;
+    case GST_EVENT_FLUSH:
+        if ((ret = gst_pad_send_event (nextpad, event)) == NULL)
+        {
+	  return NULL;
+        }
+        mad->need_flush = TRUE;
+	return ret;
+      break;
+    default:
+      break;
+  }
+    
+  return gst_pad_send_event (nextpad, event);  
+}
+
+static GstEventLength *	
+gst_mad_new_length_event (GstEventLength *length)
+{
+  GstEventLength *ret = gst_event_new_length (length->original, 0, 0);
+  gst_event_copy_length (ret, length);
+  
+  return ret;
 }
 
 static gboolean
