@@ -1332,7 +1332,8 @@ plugin_init (GModule *module, GstPlugin *plugin)
 
   while (asf_type_definitions[i].name) {
     type = gst_type_factory_new (&asf_type_definitions[i]);
-    gst_plugin_add_feature (plugin, GST_PLUGIN_FEATURE (type));
+/* We can't do this because all the typefind funcs return bogus caps in all cases */
+/*    gst_plugin_add_feature (plugin, GST_PLUGIN_FEATURE (type)); */
     i++;
   }
 
