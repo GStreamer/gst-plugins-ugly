@@ -135,21 +135,28 @@ GST_PADTEMPLATE_FACTORY (mad_sink_template_factory,
 )
 
 
-static void 		gst_mad_class_init	(GstMadClass *klass);
-static void 		gst_mad_init		(GstMad *mad);
-static void 		gst_mad_dispose 	(GObject *object);
+static void 		gst_mad_class_init		(GstMadClass *klass);
+static void 		gst_mad_init			(GstMad *mad);
+static void 		gst_mad_dispose 		(GObject *object);
 
-static void		gst_mad_set_property	(GObject *object, guint prop_id, 
-						 const GValue *value, GParamSpec *pspec);
-static void		gst_mad_get_property	(GObject *object, guint prop_id, 
-						 GValue *value, GParamSpec *pspec);
+static void		gst_mad_set_property		(GObject *object, 
+							 guint prop_id, 
+							 const GValue *value, 
+							 GParamSpec *pspec);
+static void		gst_mad_get_property		(GObject *object, 
+							 guint prop_id, 
+							 GValue *value, 
+							 GParamSpec *pspec);
 
-static void 		gst_mad_chain 		(GstPad *pad, GstData *data);
+static void 		gst_mad_chain 			(GstPad *pad, 
+							 GstData *data);
+static void 		gst_mad_bufferpool_notify	(GstPad *pad);
 
 static GstElementStateReturn
-			gst_mad_change_state 	(GstElement *element);
-static gpointer 	gst_mad_srcpad_event 	(GstPad *pad, GstData *event);
-static GstEventLength *	gst_mad_new_length_event (GstEventLength *length);
+			gst_mad_change_state 		(GstElement *element);
+static gpointer 	gst_mad_srcpad_event 		(GstPad *pad, 
+							 GstData *event);
+static GstEventLength *	gst_mad_new_length_event	(GstEventLength *length);
 
 static GstElementClass *parent_class = NULL;
 /* static guint gst_mad_signals[LAST_SIGNAL] = { 0 }; */
@@ -236,7 +243,8 @@ gst_mad_init (GstMad *mad)
 		  GST_PADTEMPLATE_GET (mad_src_template_factory), "src");
   gst_element_add_pad(GST_ELEMENT(mad),mad->srcpad);
   gst_pad_set_event_function (mad->srcpad, gst_mad_srcpad_event);
-
+  gst_pad_set_bufferpool_notify_function (mad->srcpad, gst_mad_bufferpool_notify);
+  
   mad->tempbuffer = g_malloc (MAD_BUFFER_MDLEN * 3);
   mad->tempsize = 0;
   mad->need_flush = FALSE;
@@ -626,6 +634,14 @@ next:
   gst_data_unref (dat);
 }
 
+static void
+gst_mad_bufferpool_notify (GstPad *pad)
+{
+  GstMad *mad = GST_MAD (gst_pad_get_parent (pad));
+  
+  gst_pad_set_bufferpool (mad->sinkpad, gst_pad_get_bufferpool (pad));
+}
+
 static GstElementStateReturn
 gst_mad_change_state (GstElement *element)
 {
@@ -666,8 +682,8 @@ gst_mad_srcpad_event (GstPad *pad, GstData *event)
 {
   GstEventSeek *seek;
   gpointer ret = NULL;
-  GstMad *mad = GST_MAD (GST_PAD_PARENT (pad));
-  GstPad *nextpad = GST_PAD_CAST (GST_RPAD_PEER (mad->sinkpad));
+  GstMad *mad = GST_MAD (gst_pad_get_parent (pad));
+  GstPad *nextpad = gst_pad_get_peer (mad->sinkpad);
   
   switch (GST_DATA_TYPE (event))
   {
