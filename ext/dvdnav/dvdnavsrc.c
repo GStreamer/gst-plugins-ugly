@@ -59,7 +59,6 @@ struct _DVDNavSrc {
 
   gboolean did_seek;
   gboolean need_flush;
-  GstBufferPool *bufferpool;
 
   int title, chapter, angle;
   dvdnav_t *dvdnav;
@@ -293,8 +292,6 @@ dvdnavsrc_init (DVDNavSrc *src)
 
   gst_element_add_pad (GST_ELEMENT (src), src->srcpad);
 
-  src->bufferpool = gst_buffer_pool_get_default (DVD_VIDEO_LB_LEN, 2);
-
   src->location = g_strdup("/dev/dvd");
   src->did_seek = FALSE;
   src->need_flush = FALSE;
@@ -304,17 +301,6 @@ dvdnavsrc_init (DVDNavSrc *src)
   src->streaminfo = NULL;
   src->buttoninfo = NULL;
 }
-
-/* FIXME: this code is not being used */
-#ifdef PLEASEFIXTHISCODE
-static void
-dvdnavsrc_destroy (DVDNavSrc *dvdnavsrc)
-{
-  /* FIXME */
-  g_print("FIXME\n");
-  gst_buffer_pool_destroy (dvdnavsrc->bufferpool);
-}
-#endif
 
 static gboolean 
 dvdnavsrc_is_open (DVDNavSrc *src)
@@ -850,9 +836,7 @@ dvdnavsrc_get (GstPad *pad)
   /* loop processing blocks until data is pushed */
   have_buf = FALSE;
   while (!have_buf) {
-    /* allocate a pool for the buffer data */
-    /* FIXME: mem leak on non BLOCK_OK events */
-    buf = gst_buffer_new_from_pool (src->bufferpool, DVD_VIDEO_LB_LEN, 0);
+    buf = gst_buffer_new_and_alloc (DVD_VIDEO_LB_LEN);
     if (!buf) {
       gst_element_error (GST_ELEMENT (src), "Failed to create a new GstBuffer");
       return NULL;

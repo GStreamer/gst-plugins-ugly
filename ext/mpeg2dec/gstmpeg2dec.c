@@ -271,12 +271,7 @@ gst_mpeg2dec_alloc_buffer (GstMpeg2dec *mpeg2dec, const mpeg2_info_t *info, gint
   guint8 *buf[3], *out;
   const mpeg2_picture_t *picture;
 
-  if (mpeg2dec->peerpool) {
-    outbuf = gst_buffer_new_from_pool (mpeg2dec->peerpool, 0, 0);
-  }
-  if (!outbuf) {
-    outbuf = gst_buffer_new_and_alloc ((size * 3) / 2);
-  }
+  outbuf = gst_buffer_new_and_alloc ((size * 3) / 2);
 
   out = GST_BUFFER_DATA (outbuf);
 
@@ -482,11 +477,6 @@ gst_mpeg2dec_chain (GstPad *pad, GstData *_data)
           gst_element_error (GST_ELEMENT (mpeg2dec), "could not negotiate format");
 	  goto exit;
 	}
-
-	/* now that we've negotiated, try to get a bufferpool */
-	mpeg2dec->peerpool = gst_pad_get_bufferpool (mpeg2dec->srcpad);
-	if (mpeg2dec->peerpool)
-	  GST_INFO ( "got pool %p", mpeg2dec->peerpool);
 
 	if (!mpeg2dec->have_fbuf) {
 	  /* alloc 3 buffers */
@@ -1035,7 +1025,6 @@ gst_mpeg2dec_change_state (GstElement *element)
     case GST_STATE_READY_TO_PAUSED:
     {
       mpeg2dec->next_time = 0;
-      mpeg2dec->peerpool = NULL;
 
       /* reset the initial video state */
       mpeg2dec->format = MPEG2DEC_FORMAT_NONE;
@@ -1050,19 +1039,8 @@ gst_mpeg2dec_change_state (GstElement *element)
       break;
     }
     case GST_STATE_PAUSED_TO_PLAYING:
-      /* if we've negotiated caps, try to get a bufferpool */
-      if (mpeg2dec->peerpool == NULL && mpeg2dec->width > 0) {
-	mpeg2dec->peerpool = gst_pad_get_bufferpool (mpeg2dec->srcpad);
-	if (mpeg2dec->peerpool)
-	  GST_INFO ( "got pool %p", mpeg2dec->peerpool);
-      }
       break;
     case GST_STATE_PLAYING_TO_PAUSED:
-      /* need to clear things we get from other plugins, since we could be reconnected */
-      if (mpeg2dec->peerpool) {
-	gst_buffer_pool_unref (mpeg2dec->peerpool);
-	mpeg2dec->peerpool = NULL;
-      }
       break;
     case GST_STATE_PAUSED_TO_READY:
       gst_mpeg2dec_close_decoder (mpeg2dec);

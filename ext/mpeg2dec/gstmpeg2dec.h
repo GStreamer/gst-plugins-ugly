@@ -65,7 +65,6 @@ struct _GstMpeg2dec {
   GstPad 	*sinkpad,
   		*srcpad,
   		*userdatapad;
-  GstBufferPool *peerpool;
 
   mpeg2dec_t 	*decoder;
   gboolean	 closed;
