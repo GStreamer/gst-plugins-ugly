@@ -275,7 +275,8 @@ gst_mpeg_demux_send_discont (GstMPEGParse * mpeg_parse, GstClockTime time)
   gint i;
 
   GST_DEBUG_OBJECT (mpeg_demux, "discont %" G_GUINT64_FORMAT, time);
-  discont = gst_event_new_discontinuous (FALSE, GST_FORMAT_TIME, time, NULL);
+  discont = gst_event_new_discontinuous (FALSE,
+      GST_FORMAT_TIME, time, GST_FORMAT_UNDEFINED);
 
   if (!discont) {
     GST_ELEMENT_ERROR (GST_ELEMENT (mpeg_demux),
@@ -743,6 +744,10 @@ done:
   if (pts != -1) {
     pts += mpeg_parse->adjust;
     timestamp = MPEGTIME_TO_GSTTIME (pts) + mpeg_demux->adjust;
+    /* this apparently happens for some input were headers are
+     * rewritten to make time start at zero... */
+    if ((gint64) timestamp < 0)
+      timestamp = 0;
   } else {
     timestamp = GST_CLOCK_TIME_NONE;
   }
@@ -934,7 +939,8 @@ gst_mpeg_demux_send_subbuffer (GstMPEGDemux * mpeg_demux,
     return;
   }
 
-  GST_DEBUG_OBJECT (mpeg_demux, "Creating subbuffer size %d", size);
+  GST_DEBUG_OBJECT (mpeg_demux, "Creating subbuffer size %d, time=%"
+      GST_TIME_FORMAT, size, GST_TIME_ARGS (timestamp));
   outbuf = gst_buffer_create_sub (buffer, offset, size);
 
   GST_BUFFER_TIMESTAMP (outbuf) = timestamp;

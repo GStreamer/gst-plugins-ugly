@@ -413,7 +413,7 @@ static gboolean
 gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
 {
   guint8 *buf;
-  guint64 prev_scr, scr;
+  guint64 prev_scr, scr, diff;
   guint32 scr1, scr2;
   guint32 new_rate;
 
@@ -492,8 +492,14 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
       MPEGTIME_TO_GSTTIME (mpeg_parse->current_scr) -
       MPEGTIME_TO_GSTTIME (mpeg_parse->next_scr));
 
-  if (ABS ((gint64) mpeg_parse->next_scr - (gint64) (scr)) >
-      mpeg_parse->max_discont) {
+  /* watch out for integer overflows... */
+  if (mpeg_parse->next_scr > scr) {
+    diff = mpeg_parse->next_scr - scr;
+  } else {
+    diff = scr - mpeg_parse->next_scr;
+  }
+
+  if (diff > mpeg_parse->max_discont) {
     GST_DEBUG ("discontinuity detected; expected: %" G_GUINT64_FORMAT " got: %"
         G_GUINT64_FORMAT " adjusted:%" G_GINT64_FORMAT " adjust:%"
         G_GINT64_FORMAT, mpeg_parse->next_scr, mpeg_parse->current_scr,
