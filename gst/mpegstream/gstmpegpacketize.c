@@ -204,6 +204,10 @@ gst_mpeg_packetize_read (GstMPEGPacketize *packetize)
   gboolean got_event = FALSE;
   GstData *outbuf = NULL;
 
+  if (packetize == NULL) {
+    g_warning ("gst_mpeg_packetize_read: packetize == NULL !");
+    return NULL;
+  }
   while (outbuf == NULL) {
     if (!find_start_code (packetize))
       got_event = TRUE;
