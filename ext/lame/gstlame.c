@@ -635,6 +635,13 @@ add_one_tag (const GstTagList * list, const gchar * tag, gpointer user_data)
         GST_DEBUG ("Error reading \"%s\" tag value\n", tag);
         return;
       }
+
+      if (strcmp (tag, GST_TAG_DATE) == 0) {
+        GDate *date = g_date_new_julian ((guint32) ivalue);
+
+        ivalue = g_date_get_year (date);
+        g_date_free (date);
+      }
       value = g_strdup_printf ("%u", ivalue);
       break;
     }

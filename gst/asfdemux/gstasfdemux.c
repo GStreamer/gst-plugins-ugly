@@ -673,7 +673,7 @@ IsVBR
   const guchar *tags_label[] = { "WM/Genre", "WM/AlbumTitle", "WM/AlbumArtist", "WM/TrackNumber", "WM/Year", NULL };    // "WM/Composer"
 
   GstTagList *taglist;
-  GValue tag_value = { 0 };
+  GValue tag_value = { 0, };
   gboolean have_tags = FALSE;
   guint8 *name = NULL;
 
@@ -744,8 +744,20 @@ IsVBR
 
             /* get rid of tags with empty value */
             if (strlen (value)) {
-              g_value_init (&tag_value, G_TYPE_STRING);
-              g_value_set_string (&tag_value, value);
+              if (strcmp (tags[tag], GST_TAG_DATE) == 0) {
+                guint year = atoi (value);
+
+                if (year > 0) {
+                  GDate *date = g_date_new_dmy (1, 1, year);
+
+                  g_value_init (&tag_value, G_TYPE_INT);
+                  g_value_set_int (&tag_value, g_date_get_julian (date));
+                  g_date_free (date);
+                }
+              } else {
+                g_value_init (&tag_value, G_TYPE_STRING);
+                g_value_set_string (&tag_value, value);
+              }
             }
           }
 
