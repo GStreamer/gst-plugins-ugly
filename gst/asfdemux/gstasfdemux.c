@@ -1544,6 +1544,9 @@ plugin_init (GModule *module, GstPlugin *plugin)
     -1 /* end */
   };
 
+  if (!gst_library_load ("gstbytestream"))
+    return FALSE;
+
   /* create an elementfactory for the asf_demux element */
   factory = gst_element_factory_new ("asfdemux",GST_TYPE_ASF_DEMUX,
                                     &gst_asf_demux_details);
