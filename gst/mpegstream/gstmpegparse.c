@@ -414,7 +414,7 @@ gst_mpeg_parse_loop (GstElement *element)
 
   /* maybe later we can make this less fatal, but right now this shouldn't
    * happen at all */
-  g_assert (GST_IS_ELEMENT (element);
+  g_assert (GST_IS_ELEMENT (element));
 
   data = gst_mpeg_packetize_read (mpeg_parse->packetize);
 
