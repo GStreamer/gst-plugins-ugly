@@ -29,6 +29,8 @@
 */
 #ifndef MPEG2_RELEASE
 typedef picture_t mpeg2_picture_t;
+typedef gint mpeg2_state_t;
+#define STATE_BUFFER 0
 #endif
 
 /* elementfactory information */
@@ -397,7 +399,7 @@ update_streaminfo (GstMpeg2dec *mpeg2dec)
 static void
 gst_mpeg2dec_flush_decoder (GstMpeg2dec *mpeg2dec)
 {
-  gint state;
+  mpeg2_state_t state;
 
   if (mpeg2dec->decoder) {
     const mpeg2_info_t *info = mpeg2_info (mpeg2dec->decoder);
@@ -410,7 +412,7 @@ gst_mpeg2dec_flush_decoder (GstMpeg2dec *mpeg2dec)
 	}
       }
     } 
-    while (state != -1);
+    while (state != STATE_BUFFER && state != -1);
   }
 }
 
@@ -422,7 +424,7 @@ gst_mpeg2dec_chain (GstPad *pad, GstBuffer *buf)
   guint8 *data, *end;
   gint64 pts;
   const mpeg2_info_t *info;
-  gint state;
+  mpeg2_state_t state;
   gboolean done = FALSE;
 
   if (GST_IS_EVENT (buf)) {
@@ -624,6 +626,7 @@ gst_mpeg2dec_chain (GstPad *pad, GstBuffer *buf)
         break;
       }
       /* need more data */
+      case STATE_BUFFER:
       case -1:
 	done = TRUE;
 	break;
