@@ -238,6 +238,7 @@ gst_mad_emphasis_get_type(void) {
     {MAD_EMPHASIS_NONE,       "0", "None"},
     {MAD_EMPHASIS_50_15_US,   "1", "50/15 Microseconds"},
     {MAD_EMPHASIS_CCITT_J_17, "2", "CCITT J.17"},
+    {MAD_EMPHASIS_RESERVED,   "3", "Reserved"},
     { 0, NULL, NULL},
   };
   if (!mad_emphasis_type) {
@@ -1232,30 +1233,3 @@ gst_mad_change_state (GstElement *element)
   return parent_class->change_state (element);
 }
 
-static gboolean
-plugin_init (GstPlugin *plugin)
-{
-  /* we need the gsttags plugin for metadata querying */
-  if (!gst_plugin_load ("gsttags"))
-    return FALSE;
-  
-  /* create an elementfactory for the mad element */
-  if (!gst_element_register (plugin, "mad", GST_RANK_PRIMARY, GST_TYPE_MAD) ||
-      !gst_element_register (plugin, "id3tag", GST_RANK_PRIMARY, gst_id3_tag_get_type ()))
-    return FALSE;
-
-  return TRUE;
-}
-
-GST_PLUGIN_DEFINE (
-  GST_VERSION_MAJOR,
-  GST_VERSION_MINOR,
-  "mad",
-  "mp3 decoding and tag editing based on the mad library",
-  plugin_init,
-  VERSION,
-  "GPL",
-  GST_COPYRIGHT,
-  GST_PACKAGE,
-  GST_ORIGIN
-)

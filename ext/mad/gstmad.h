@@ -18,11 +18,11 @@
  */
 
 
-#ifndef __GST_GNOME_VFS_H__
-#define __GST_GNOME_VFS_H__
+#ifndef __GST_MAD_H__
+#define __GST_MAD_H__
 
 #include <gst/gst.h>
-#include <gst/tags/gsttagediting.h>
+#include <gst/tag/tag.h>
 #include <mad.h>
 #include <id3tag.h>
 
@@ -30,6 +30,7 @@ G_BEGIN_DECLS
   
 
 GType			gst_mad_get_type		(void);
+GType			gst_id3_parse_get_type		(void);
 GType			gst_id3_tag_get_type		(void);
 
 GstTagList*		gst_mad_id3_to_tag_list		(const struct id3_tag *	tag);
@@ -38,4 +39,4 @@ struct id3_tag *	gst_mad_tag_list_to_id3_tag	(GstTagList *		list);
 
 G_END_DECLS
 
-#endif /* __GST_GNOME_VFS_H__ */
+#endif /* __GST_MAD_H__ */
