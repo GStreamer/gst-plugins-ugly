@@ -552,6 +552,7 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
   GstDVDLPCMStream *lpcm_str = NULL;
   gboolean add_pad = FALSE;
   GstCaps *caps;
+  const gchar *codec = NULL;
 
   g_return_val_if_fail (stream_nr < GST_MPEG_DEMUX_NUM_AUDIO_STREAMS, NULL);
   g_return_val_if_fail (type > GST_MPEG_DEMUX_AUDIO_UNKNOWN &&
@@ -649,15 +650,17 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
         lpcm_str->dynamic_range = dynamic_range;
         lpcm_str->mute = mute;
         lpcm_str->emphasis = emphasis;
-
+        codec = "LPCM audio";
         break;
 
       case GST_DVD_DEMUX_AUDIO_AC3:
         caps = gst_caps_new_simple ("audio/x-ac3", NULL);
+        codec = "AC-3 audio";
         break;
 
       case GST_DVD_DEMUX_AUDIO_DTS:
         caps = gst_caps_new_simple ("audio/x-dts", NULL);
+        codec = "DTS audio";
         break;
 
       default:
@@ -671,8 +674,18 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
       /* This is the current audio stream.  Use the same caps. */
       gst_pad_set_explicit_caps (dvd_demux->cur_audio, gst_caps_copy (caps));
     }
-    if (add_pad)
+    if (add_pad) {
       gst_element_add_pad (GST_ELEMENT (mpeg_demux), str->pad);
+
+      if (codec) {
+        GstTagList *list = gst_tag_list_new ();
+
+        gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+            GST_TAG_AUDIO_CODEC, codec, NULL);
+        gst_element_found_tags_for_pad (GST_ELEMENT (mpeg_demux),
+            str->pad, 0, list);
+      }
+    }
 
     str->type = type;
   }

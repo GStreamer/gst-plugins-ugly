@@ -412,6 +412,9 @@ gst_mpeg_demux_get_video_stream (GstMPEGDemux * mpeg_demux,
   }
 
   if (set_caps || video_str->mpeg_version != mpeg_version) {
+    gchar *codec;
+    GstTagList *list;
+
     /* We need to set new caps for this pad. */
     caps = gst_caps_new_simple ("video/mpeg",
         "mpegversion", G_TYPE_INT, mpeg_version,
@@ -428,6 +431,15 @@ gst_mpeg_demux_get_video_stream (GstMPEGDemux * mpeg_demux,
 
     /* Store the current values. */
     video_str->mpeg_version = mpeg_version;
+
+    /* set stream metadata */
+    codec = g_strdup_printf ("MPEG-%d video", mpeg_version);
+    list = gst_tag_list_new ();
+    gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+        GST_TAG_VIDEO_CODEC, codec, NULL);
+    g_free (codec);
+    gst_element_found_tags_for_pad (GST_ELEMENT (mpeg_demux),
+        str->pad, 0, list);
   }
 
   return str;
@@ -467,6 +479,8 @@ gst_mpeg_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
   }
 
   if (set_caps) {
+    GstTagList *list;
+
     /* We need to set new caps for this pad. */
     caps = gst_caps_new_simple ("audio/mpeg",
         "mpegversion", G_TYPE_INT, 1, NULL);
@@ -479,6 +493,13 @@ gst_mpeg_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
     }
     gst_caps_free (caps);
     gst_element_add_pad (GST_ELEMENT (mpeg_demux), str->pad);
+
+    /* stream metadata */
+    list = gst_tag_list_new ();
+    gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+        GST_TAG_AUDIO_CODEC, "MPEG-1 audio", NULL);
+    gst_element_found_tags_for_pad (GST_ELEMENT (mpeg_demux),
+        str->pad, 0, list);
   }
 
   return str;
