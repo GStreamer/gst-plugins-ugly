@@ -254,7 +254,7 @@ gst_asfmux_init (GstAsfMux *asfmux)
 }
 
 static GstPadLinkReturn
-gst_asfmux_vidsink_link (GstPad *pad, const GstCaps2 *caps)
+gst_asfmux_vidsink_link (GstPad *pad, const GstCaps *caps)
 {
   GstAsfMux *asfmux;
   GstAsfMuxStream *stream = NULL;
@@ -279,7 +279,7 @@ gst_asfmux_vidsink_link (GstPad *pad, const GstCaps2 *caps)
   GST_DEBUG ("asfmux: video sinkconnect triggered on %s",
 	     gst_pad_get_name (pad));
 
-  structure = gst_caps2_get_nth_cap (caps, 0);
+  structure = gst_caps_get_structure (caps, 0);
 
   /* global */
   ret = gst_structure_get_int (structure, "width", &w);
@@ -387,7 +387,7 @@ done:
 }
 
 static GstPadLinkReturn
-gst_asfmux_audsink_link (GstPad *pad, const GstCaps2 *caps)
+gst_asfmux_audsink_link (GstPad *pad, const GstCaps *caps)
 {
   GstAsfMux *asfmux;
   GstAsfMuxStream *stream = NULL;
@@ -412,7 +412,7 @@ gst_asfmux_audsink_link (GstPad *pad, const GstCaps2 *caps)
   GST_DEBUG ("asfmux: audio sink_link triggered on %s",
 	     gst_pad_get_name (pad));
 
-  structure = gst_caps2_get_nth_cap (caps, 0);
+  structure = gst_caps_get_structure (caps, 0);
 
   /* we want these for all */
   ret = gst_structure_get_int (structure, "channels", &channels);

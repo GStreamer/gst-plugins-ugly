@@ -36,7 +36,7 @@ struct _GstRMDemuxStream {
   guint32 subtype;
   guint32 fourcc;
   int id;
-  GstCaps2 *caps;
+  GstCaps *caps;
   GstPad *pad;
   int n_samples;
   int timescale;
@@ -105,7 +105,7 @@ GST_STATIC_PAD_TEMPLATE (
   "video_%02d",
   GST_PAD_SRC,
   GST_PAD_SOMETIMES,
-  GST_STATIC_CAPS2_ANY
+  GST_STATIC_CAPS_ANY
 );
 
 static GstStaticPadTemplate gst_rmdemux_audiosrc_template =
@@ -113,7 +113,7 @@ GST_STATIC_PAD_TEMPLATE (
   "audio_%02d",
   GST_PAD_SRC,
   GST_PAD_SOMETIMES,
-  GST_STATIC_CAPS2_ANY
+  GST_STATIC_CAPS_ANY
 );
 
 static GstElementClass *parent_class = NULL;
@@ -125,8 +125,8 @@ static GstElementStateReturn gst_rmdemux_change_state(GstElement *element);
 static void gst_rmdemux_loop (GstElement *element);
 static gboolean gst_rmdemux_handle_sink_event (GstRMDemux *rmdemux);
 
-//static GstCaps2 *gst_rmdemux_video_caps(GstRMDemux *rmdemux, guint32 fourcc);
-//static GstCaps2 *gst_rmdemux_audio_caps(GstRMDemux *rmdemux, guint32 fourcc);
+//static GstCaps *gst_rmdemux_video_caps(GstRMDemux *rmdemux, guint32 fourcc);
+//static GstCaps *gst_rmdemux_audio_caps(GstRMDemux *rmdemux, guint32 fourcc);
 
 static void gst_rmdemux_parse__rmf(GstRMDemux *rmdemux, void *data, int length);
 static void gst_rmdemux_parse_prop(GstRMDemux *rmdemux, void *data, int length);
@@ -462,7 +462,7 @@ static void gst_rmdemux_loop (GstElement *element)
 
 }
 
-static GstCaps2 *gst_rmdemux_src_getcaps(GstPad *pad)
+static GstCaps *gst_rmdemux_src_getcaps(GstPad *pad)
 {
   GstRMDemux *rmdemux;
   GstRMDemuxStream *stream;
@@ -474,13 +474,13 @@ static GstCaps2 *gst_rmdemux_src_getcaps(GstPad *pad)
   g_return_val_if_fail(GST_IS_RMDEMUX(rmdemux), NULL);
 
   stream = GST_PAD_ELEMENT_PRIVATE (pad);
-  return gst_caps2_copy(stream->caps);
+  return gst_caps_copy(stream->caps);
 }
 
 #ifdef unused
 /* This function is not useful currently */
 static GstPadLinkReturn
-gst_rmdemux_src_link(GstPad *pad, static GstCaps2 *caps)
+gst_rmdemux_src_link(GstPad *pad, static GstCaps *caps)
 {
   GstRMDemux *rmdemux;
   GstRMDemuxStream *stream;
@@ -526,7 +526,7 @@ void gst_rmdemux_add_stream(GstRMDemux *rmdemux, GstRMDemuxStream *stream)
 	gst_static_pad_template_get (&gst_rmdemux_videosrc_template),
         g_strdup_printf ("video_%02d", rmdemux->n_video_streams));
     if(stream->caps) {
-      gst_caps2_set_simple (stream->caps,
+      gst_caps_set_simple (stream->caps,
 	  "width", G_TYPE_INT, stream->width,
 	  "height", G_TYPE_INT, stream->height, NULL);
     }
@@ -536,8 +536,8 @@ void gst_rmdemux_add_stream(GstRMDemux *rmdemux, GstRMDemuxStream *stream)
     stream->pad = gst_pad_new_from_template (
 	gst_static_pad_template_get (&gst_rmdemux_audiosrc_template),
         g_strdup_printf ("audio_%02d", rmdemux->n_audio_streams));
-    stream->caps = gst_caps2_new_simple("audio/a52",NULL);
-    gst_caps2_set_simple (stream->caps,
+    stream->caps = gst_caps_new_simple("audio/a52",NULL);
+    gst_caps_set_simple (stream->caps,
 	"rate", G_TYPE_INT, (int)stream->rate,
 	"channels", G_TYPE_INT, stream->n_channels, NULL);
     rmdemux->n_audio_streams++;
@@ -571,12 +571,12 @@ void gst_rmdemux_add_stream(GstRMDemux *rmdemux, GstRMDemuxStream *stream)
 
 #if 0
 
-static GstCaps2 *gst_rmdemux_video_caps(GstRMDemux *rmdemux, guint32 fourcc)
+static GstCaps *gst_rmdemux_video_caps(GstRMDemux *rmdemux, guint32 fourcc)
 {
   return NULL;
 }
 
-static GstCaps2 *gst_rmdemux_audio_caps(GstRMDemux *rmdemux, guint32 fourcc)
+static GstCaps *gst_rmdemux_audio_caps(GstRMDemux *rmdemux, guint32 fourcc)
 {
   return NULL;
 }

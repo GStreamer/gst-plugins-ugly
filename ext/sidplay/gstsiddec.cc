@@ -211,7 +211,7 @@ gst_siddec_class_init (GstSidDec *klass)
                         1, G_MAXULONG, DEFAULT_BLOCKSIZE, (GParamFlags)G_PARAM_READWRITE));
   g_object_class_install_property (gobject_class, ARG_METADATA,
     g_param_spec_boxed ("metadata", "Metadata", "Metadata",
-                        GST_TYPE_CAPS2, (GParamFlags)G_PARAM_READABLE));
+                        GST_TYPE_CAPS, (GParamFlags)G_PARAM_READABLE));
 
   gobject_class->set_property = gst_siddec_set_property;
   gobject_class->get_property = gst_siddec_get_property;
@@ -316,7 +316,7 @@ G_STMT_START {                                  \
 static gboolean
 siddec_negotiate (GstSidDec *siddec)
 {
-  GstCaps2 *allowed;
+  GstCaps *allowed;
   gboolean sign = TRUE;
   gint width = 0, depth = 0;
   GstStructure *structure;
@@ -327,7 +327,7 @@ siddec_negotiate (GstSidDec *siddec)
   if (!allowed)
     return FALSE;
 
-  structure = gst_caps2_get_nth_cap (allowed, 0);
+  structure = gst_caps_get_structure (allowed, 0);
 
   gst_structure_get_int (structure, "width", &width);
   gst_structure_get_int (structure, "depth", &depth);
@@ -351,7 +351,7 @@ siddec_negotiate (GstSidDec *siddec)
   
   if (!GST_PAD_CAPS (siddec->srcpad)) {
     if (!gst_pad_try_set_caps (siddec->srcpad, 
-          gst_caps2_new_simple ("audio/x-raw-int",
+          gst_caps_new_simple ("audio/x-raw-int",
             "endianness", G_TYPE_INT, G_BYTE_ORDER,
             "signed",     G_TYPE_BOOLEAN, sign,
             "width",      G_TYPE_INT, siddec->config->bitsPerSample,

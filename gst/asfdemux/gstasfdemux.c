@@ -77,13 +77,13 @@ static gboolean            gst_asf_demux_add_audio_stream (GstASFDemux *asf_demu
 							   guint16 id);
 static gboolean            gst_asf_demux_setup_pad        (GstASFDemux *asf_demux,
 							   GstPad *src_pad,
-							   GstCaps2 *caps_list,
+							   GstCaps *caps_list,
 							   guint16 id);
 
 static GstElementStateReturn gst_asf_demux_change_state   (GstElement *element);
-static GstCaps2 * gst_asf_demux_video_caps (guint32 codec_fcc,
+static GstCaps * gst_asf_demux_video_caps (guint32 codec_fcc,
 					   asf_stream_video_format *video);
-static GstCaps2 * gst_asf_demux_audio_caps (guint16 codec_id,
+static GstCaps * gst_asf_demux_audio_caps (guint16 codec_id,
 					   asf_stream_audio *audio, guint8 *extradata);
 
 static GstPadTemplate *videosrctempl, *audiosrctempl;
@@ -116,7 +116,7 @@ gst_asf_demux_base_init (gpointer g_class)
 {
   GstElementClass *element_class = GST_ELEMENT_CLASS (g_class);
   int i;
-  GstCaps2 *audcaps, *vidcaps, *temp;
+  GstCaps *audcaps, *vidcaps, *temp;
   guint32 vid_list[] = {
     GST_MAKE_FOURCC('I','4','2','0'),
     GST_MAKE_FOURCC('Y','U','Y','2'),
@@ -143,10 +143,10 @@ gst_asf_demux_base_init (gpointer g_class)
     -1 /* end */
   };
 
-  audcaps = gst_caps2_new_empty();
+  audcaps = gst_caps_new_empty();
   for (i = 0; aud_list[i] != -1; i++) {
     temp = gst_asf_demux_audio_caps (aud_list[i], NULL, NULL);
-    gst_caps2_append (audcaps, temp);
+    gst_caps_append (audcaps, temp);
   }
 
   audiosrctempl = gst_pad_template_new ("audio_%02d",
@@ -154,10 +154,10 @@ gst_asf_demux_base_init (gpointer g_class)
 				        GST_PAD_SOMETIMES,
 					audcaps);
 
-  vidcaps = gst_caps2_new_empty();
+  vidcaps = gst_caps_new_empty();
   for (i = 0; vid_list[i] != 0; i++) {
     temp = gst_asf_demux_video_caps (vid_list[i], NULL);
-    gst_caps2_append (vidcaps, temp);
+    gst_caps_append (vidcaps, temp);
   }
 
   videosrctempl = gst_pad_template_new ("video_%02d",
@@ -1245,11 +1245,11 @@ gst_asf_demux_identify_guid (GstASFDemux *asf_demux,
 		      ##props)
 #endif
 
-static GstCaps2 *
+static GstCaps *
 gst_asf_demux_audio_caps (guint16 codec_id,
 			  asf_stream_audio *audio, guint8 *extradata)
 {
-  GstCaps2 *caps;
+  GstCaps *caps;
   gint flags1, flags2;
 
   flags1 = 0;
@@ -1257,15 +1257,15 @@ gst_asf_demux_audio_caps (guint16 codec_id,
 
   switch (codec_id) {
     case GST_RIFF_WAVE_FORMAT_MPEGL3: /* mp3 */
-      caps = gst_caps2_from_string ("audio/mpeg, layer = (int) 3");
+      caps = gst_caps_from_string ("audio/mpeg, layer = (int) 3");
       break;
 
     case GST_RIFF_WAVE_FORMAT_MPEGL12: /* mp1 or mp2 */
-      caps = gst_caps2_from_string ("audio/mpeg, layer = (int) 2");
+      caps = gst_caps_from_string ("audio/mpeg, layer = (int) 2");
       break;
 
     case GST_RIFF_WAVE_FORMAT_PCM: /* PCM/wav */ {
-      caps = gst_caps2_from_string ("audio/x-raw-int, "
+      caps = gst_caps_from_string ("audio/x-raw-int, "
 	  "endianness = (int) LITTLE_ENDIAN,"
 	  "signed = (boolean) { true, false }, "
 	  "width = (int) { 8, 16 }, "
@@ -1276,7 +1276,7 @@ gst_asf_demux_audio_caps (guint16 codec_id,
         gint ch = GUINT16_FROM_LE (audio->channels);
         gint ws = GUINT16_FROM_LE (audio->word_size);
 
-	gst_caps2_set_simple (caps,
+	gst_caps_set_simple (caps,
 	    "width", G_TYPE_INT, (int)(ba * 8 / ch),
 	    "depth", G_TYPE_INT, ws,
 	    "signed", G_TYPE_BOOLEAN, (ws != 8),
@@ -1291,11 +1291,11 @@ gst_asf_demux_audio_caps (guint16 codec_id,
     case GST_RIFF_WAVE_FORMAT_VORBIS1PLUS: /* vorbis mode 1+ */
     case GST_RIFF_WAVE_FORMAT_VORBIS2PLUS: /* vorbis mode 2+ */
     case GST_RIFF_WAVE_FORMAT_VORBIS3PLUS: /* vorbis mode 3+ */
-      caps = gst_caps2_from_string("audio/x-vorbis");
+      caps = gst_caps_from_string("audio/x-vorbis");
       break;
 
     case GST_RIFF_WAVE_FORMAT_A52:
-      caps = gst_caps2_from_string("audio/x-ac3");
+      caps = gst_caps_from_string("audio/x-ac3");
       break;
 
     case GST_RIFF_WAVE_FORMAT_DIVX_WMAV1:
@@ -1304,14 +1304,14 @@ gst_asf_demux_audio_caps (guint16 codec_id,
         flags1 = extradata[0] | (extradata[1] << 8);
         flags2 = extradata[2] | (extradata[3] << 8);
       }
-      caps = gst_caps2_from_string("audio/x-wma, "
+      caps = gst_caps_from_string("audio/x-wma, "
 	  "wmaversion = (int) 1, "
 	  "flags1 = (int) [ MIN, MAX ], "
 	  "flags2 = (int) [ MIN, MAX ], "
 	  "block_align = (int) [ 0, MAX ], "
 	  "bitrate = (int) [ 0, MAX ]");
       if (audio != NULL) {
-	gst_caps2_set_simple (caps,
+	gst_caps_set_simple (caps,
 	    "flags1", G_TYPE_INT, flags1,
 	    "flags2", G_TYPE_INT, flags1,
 	    "block_align", G_TYPE_INT, audio->block_align,
@@ -1327,14 +1327,14 @@ gst_asf_demux_audio_caps (guint16 codec_id,
                 (extradata[2] << 16) | (extradata[3] << 24);
         flags2 = extradata[4] | (extradata[5] << 8);
       }
-      caps = gst_caps2_from_string("audio/x-wma, "
+      caps = gst_caps_from_string("audio/x-wma, "
 	  "wmaversion = (int) 2, "
 	  "flags1 = (int) [ MIN, MAX ], "
 	  "flags2 = (int) [ MIN, MAX ], "
 	  "block_align = (int) [ 0, MAX ], "
 	  "bitrate = (int) [ 0, MAX ]");
       if (audio != NULL) {
-	gst_caps2_set_simple (caps,
+	gst_caps_set_simple (caps,
 	    "flags1", G_TYPE_INT, flags1,
 	    "flags2", G_TYPE_INT, flags1,
 	    "block_align", G_TYPE_INT, audio->block_align,
@@ -1344,24 +1344,24 @@ gst_asf_demux_audio_caps (guint16 codec_id,
       break;
 
     case GST_RIFF_WAVE_FORMAT_WMAV9:
-      caps = gst_caps2_from_string("audio/x-wma, "
+      caps = gst_caps_from_string("audio/x-wma, "
 	  "wmaversion = (int) 9");
       break;
 
     default:
       g_warning ("asfdemux: unkown audio format 0x%04x",
 		 codec_id);
-      return GST_CAPS2_ANY;
+      return GST_CAPS_ANY;
       break;
   }
 
   if (audio != NULL) {
-    gst_caps2_set_simple (caps,
+    gst_caps_set_simple (caps,
 	"rate", G_TYPE_INT, GUINT32_FROM_LE (audio->sample_rate),
 	"channels", G_TYPE_INT, GUINT16_FROM_LE (audio->channels),
 	NULL);
   }else{
-    gst_caps2_set_simple (caps,
+    gst_caps_set_simple (caps,
 	"rate", GST_TYPE_INT_RANGE, 8000, 96000,
 	"channels", GST_TYPE_INT_RANGE, 1, 2,
 	NULL);
@@ -1376,7 +1376,7 @@ gst_asf_demux_add_audio_stream (GstASFDemux *asf_demux,
 				guint16 id) 
 {
   GstPad         *src_pad;  
-  GstCaps2       *caps;
+  GstCaps       *caps;
   gchar          *name = NULL;
   guint16         size_left = 0;
   guint8         *extradata=NULL;
@@ -1447,11 +1447,11 @@ gst_asf_demux_add_audio_stream (GstASFDemux *asf_demux,
 		      ##props)
 #endif
 
-static GstCaps2 *
+static GstCaps *
 gst_asf_demux_video_caps (guint32 codec_fcc,
 			  asf_stream_video_format *video)
 {
-  GstCaps2 *caps = NULL;
+  GstCaps *caps = NULL;
   gint width = 0, height = 0;
   
   if (video != NULL) {
@@ -1462,7 +1462,7 @@ gst_asf_demux_video_caps (guint32 codec_fcc,
   switch (codec_fcc) {
     case GST_MAKE_FOURCC('I','4','2','0'):
     case GST_MAKE_FOURCC('Y','U','Y','2'):
-      caps = gst_caps2_new_simple ("video/x-raw-yuv",
+      caps = gst_caps_new_simple ("video/x-raw-yuv",
 	  "format", GST_TYPE_FOURCC, codec_fcc, NULL);
       break;
 
@@ -1470,51 +1470,51 @@ gst_asf_demux_video_caps (guint32 codec_fcc,
     case GST_MAKE_FOURCC('J','P','E','G'):
     case GST_MAKE_FOURCC('P','I','X','L'):
     case GST_MAKE_FOURCC('V','I','X','L'):
-      caps = gst_caps2_new_simple ("video/x-jpeg", NULL);
+      caps = gst_caps_new_simple ("video/x-jpeg", NULL);
       break;
 
     case GST_MAKE_FOURCC('D','V','S','D'):
     case GST_MAKE_FOURCC('d','v','s','d'):
-      caps = gst_caps2_new_simple ("video/x-dv",
+      caps = gst_caps_new_simple ("video/x-dv",
 	  "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       break;
 
     case GST_MAKE_FOURCC('W','M','V','1'):
-      caps = gst_caps2_new_simple ("video/x-wmv",
+      caps = gst_caps_new_simple ("video/x-wmv",
 	  "wmvversion", G_TYPE_INT, 1, NULL);
       break;
 
     case GST_MAKE_FOURCC('W','M','V','2'):
-      caps = gst_caps2_new_simple ("video/x-wmv",
+      caps = gst_caps_new_simple ("video/x-wmv",
 	  "wmvversion", G_TYPE_INT, 2, NULL);
       break;
 
     case GST_MAKE_FOURCC('M','P','G','4'):
-      caps = gst_caps2_new_simple ("video/x-msmpeg",
+      caps = gst_caps_new_simple ("video/x-msmpeg",
 	  "msmpegversion", G_TYPE_INT, 41, NULL);
       break;
 
     case GST_MAKE_FOURCC('M','P','4','2'):
-      caps = gst_caps2_new_simple ("video/x-msmpeg",
+      caps = gst_caps_new_simple ("video/x-msmpeg",
 	  "msmpegversion", G_TYPE_INT, 42, NULL);
       break;
 
     case GST_MAKE_FOURCC('M','P','4','3'):
-      caps = gst_caps2_new_simple ("video/x-msmpeg",
+      caps = gst_caps_new_simple ("video/x-msmpeg",
 	  "msmpegversion", G_TYPE_INT, 43, NULL);
       break;
 
     case GST_MAKE_FOURCC('D','I','V','3'):
     case GST_MAKE_FOURCC('D','I','V','4'):
     case GST_MAKE_FOURCC('D','I','V','5'):
-      caps = gst_caps2_new_simple ("video/x-divx",
+      caps = gst_caps_new_simple ("video/x-divx",
 	  "divxversion", G_TYPE_INT, 3, NULL);
       break;
 
     case GST_MAKE_FOURCC('D','I','V','X'):
     case GST_MAKE_FOURCC('d','i','v','x'):
     case GST_MAKE_FOURCC('D','X','5','0'):
-      caps = gst_caps2_new_simple ("video/x-divx",
+      caps = gst_caps_new_simple ("video/x-divx",
 	  "divxversion", G_TYPE_INT, 5, NULL);
       break;
 
@@ -1526,12 +1526,12 @@ gst_asf_demux_video_caps (guint32 codec_fcc,
   }
 
   if (video != NULL) {
-    gst_caps2_set_simple (caps,
+    gst_caps_set_simple (caps,
 	"width", G_TYPE_INT, GUINT32_FROM_LE (video->width),
 	"height", G_TYPE_INT, GUINT32_FROM_LE (video->height),
         "framerate", G_TYPE_DOUBLE, 0, NULL);
   } else {
-    gst_caps2_set_simple (caps,
+    gst_caps_set_simple (caps,
 	"width", GST_TYPE_INT_RANGE, 1, G_MAXINT,
 	"height", GST_TYPE_INT_RANGE, 1, G_MAXINT,
         "framerate", GST_TYPE_DOUBLE_RANGE, 0.0, G_MAXDOUBLE,
@@ -1546,7 +1546,7 @@ gst_asf_demux_add_video_stream (GstASFDemux *asf_demux,
 				asf_stream_video_format *video,
 				guint16 id) {
   GstPad         *src_pad;  
-  GstCaps2        *caps;
+  GstCaps        *caps;
   gchar          *name = NULL;
   
   /* Create the audio pad */
@@ -1572,7 +1572,7 @@ gst_asf_demux_add_video_stream (GstASFDemux *asf_demux,
 static gboolean
 gst_asf_demux_setup_pad (GstASFDemux *asf_demux,
 			 GstPad *src_pad,
-			 GstCaps2 *caps_list,
+			 GstCaps *caps_list,
 			 guint16 id)
 {
   asf_stream_context *stream;

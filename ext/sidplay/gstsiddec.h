@@ -62,7 +62,7 @@ struct _GstSidDec {
 
   gulong	 blocksize;
 
-  GstCaps2	*metadata;
+  GstCaps	*metadata;
 };
 
 struct _GstSidDecClass {

@@ -337,8 +337,8 @@ gst_ac3parse_chain (GstPad *pad, GstData *_data)
           need_capsnego = TRUE;
         }
         if (need_capsnego) {
-          GstCaps2 *newcaps;
-          newcaps = gst_caps2_new_simple ("audio/x-ac3",
+          GstCaps *newcaps;
+          newcaps = gst_caps_new_simple ("audio/x-ac3",
 	      "channels", G_TYPE_INT, channels,
 	      "rate",     G_TYPE_INT, sample_rate, NULL);
           if (gst_pad_try_set_caps (ac3parse->srcpad, newcaps) <= 0) {

@@ -340,15 +340,15 @@ gst_lame_class_init (GstLameClass *klass)
 }
 
 static GstPadLinkReturn
-gst_lame_sink_link (GstPad *pad, const GstCaps2 *caps)
+gst_lame_sink_link (GstPad *pad, const GstCaps *caps)
 {
   GstLame *lame;
   gint out_samplerate;
   GstStructure *structure;
-  GstCaps2 *othercaps;
+  GstCaps *othercaps;
 
   lame = GST_LAME (gst_pad_get_parent (pad));
-  structure = gst_caps2_get_nth_cap (caps, 0);
+  structure = gst_caps_get_structure (caps, 0);
 
   gst_structure_get_int (structure, "rate", &lame->samplerate);
   gst_structure_get_int (structure, "channels", &lame->num_channels);
@@ -361,7 +361,7 @@ gst_lame_sink_link (GstPad *pad, const GstCaps2 *caps)
 
   out_samplerate = lame_get_out_samplerate (lame->lgf);
   othercaps = 
-	  gst_caps2_new_simple (
+	  gst_caps_new_simple (
 		                "audio/mpeg",
                                 "mpegversion", G_TYPE_INT, 1,
 			        "layer", G_TYPE_INT, 3,

@@ -92,7 +92,7 @@ GST_STATIC_PAD_TEMPLATE (
   "private_stream_2",
   GST_PAD_SRC,
   GST_PAD_SOMETIMES,
-  GST_STATIC_CAPS2_ANY
+  GST_STATIC_CAPS_ANY
 );
 
 static GstStaticPadTemplate pcm_factory =
@@ -115,7 +115,7 @@ GST_STATIC_PAD_TEMPLATE (
   "subtitle_stream_%d",
   GST_PAD_SRC,
   GST_PAD_SOMETIMES,
-  GST_STATIC_CAPS2_ANY
+  GST_STATIC_CAPS_ANY
 );
 
 static void 		gst_mpeg_demux_class_init	(GstMPEGDemuxClass *klass);
@@ -383,7 +383,7 @@ gst_mpeg_demux_parse_syshead (GstMPEGParse *mpeg_parse, GstBuffer *buffer)
       gchar *name = NULL;
       GstMPEGStream **outstream = NULL;
       GstPadTemplate *newtemp = NULL;
-      GstCaps2 *caps = NULL;
+      GstCaps *caps = NULL;
 
       stream_id = *buf++;
       if (!(stream_id & 0x80)) {
@@ -428,11 +428,11 @@ gst_mpeg_demux_parse_syshead (GstMPEGParse *mpeg_parse, GstBuffer *buffer)
 	outstream = &mpeg_demux->video_stream[stream_id & 0x0F];
         newtemp = gst_static_pad_template_get (&video_src_factory);
 	if (!GST_MPEG_PARSE_IS_MPEG2 (mpeg_demux)) {
-	  caps = gst_caps2_new_simple ("video/mpeg",
+	  caps = gst_caps_new_simple ("video/mpeg",
 	      "mpegversion",  G_TYPE_INT, 1,
 	      "systemstream",  G_TYPE_BOOLEAN, FALSE, NULL);
 	} else {
-	  caps = gst_caps2_new_simple ("video/mpeg",
+	  caps = gst_caps_new_simple ("video/mpeg",
 	    "mpegversion",  G_TYPE_INT, 2,
 	    "systemstream",  G_TYPE_BOOLEAN, FALSE, NULL);
         }
@@ -851,7 +851,7 @@ gst_mpeg_demux_parse_pes (GstMPEGParse *mpeg_parse, GstBuffer *buffer)
   /* the app and used to attach to desired streams.			*/
   if ((*outstream) == NULL) {
     gchar *name = NULL;
-    GstCaps2 *caps = NULL;
+    GstCaps *caps = NULL;
 
     /* we have to name the stream approriately */
     if (id == 0xBD) {
@@ -887,12 +887,12 @@ gst_mpeg_demux_parse_pes (GstMPEGParse *mpeg_parse, GstBuffer *buffer)
       name = g_strdup_printf ("video_%02d", id - 0xE0);
       newtemp = gst_static_pad_template_get (&video_src_factory);
       if (!GST_MPEG_PARSE_IS_MPEG2 (mpeg_demux)) {
-        caps = gst_caps2_new_simple ("video/mpeg",
+        caps = gst_caps_new_simple ("video/mpeg",
           "mpegversion", G_TYPE_INT, 1,
           "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       }
       else {
-        caps = gst_caps2_new_simple ("video/mpeg",
+        caps = gst_caps_new_simple ("video/mpeg",
           "mpegversion", G_TYPE_INT, 2,
           "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       }
@@ -989,7 +989,7 @@ static void
 gst_mpeg_demux_lpcm_set_caps (GstPad *pad, guint8 sample_info)
 {
   gint width, rate, channels;
-  GstCaps2 *caps;
+  GstCaps *caps;
 
   /* Determine the sample width. */
   switch (sample_info & 0xC0) {
@@ -1014,7 +1014,7 @@ gst_mpeg_demux_lpcm_set_caps (GstPad *pad, guint8 sample_info)
   /* Determine the number of channels. */
   channels = (sample_info & 0x7) + 1;
 
-  caps = gst_caps2_new_simple ("audio/x-raw-int",
+  caps = gst_caps_new_simple ("audio/x-raw-int",
       "endianness",       G_TYPE_INT, G_BIG_ENDIAN,
       "signed",           G_TYPE_BOOLEAN, TRUE,
       "width",            G_TYPE_INT, width,

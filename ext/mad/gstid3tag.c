@@ -64,7 +64,7 @@ struct _GstID3Tag {
 
   /* caps */
   GstID3ParseMode     	parse_mode;
-  GstCaps2 *		found_caps;
+  GstCaps *		found_caps;
 
   /* tags */
   GstTagList *		event_tags;
@@ -229,18 +229,18 @@ gst_id3_tag_class_init (GstID3TagClass *klass)
   gobject_class->get_property = GST_DEBUG_FUNCPTR (gst_id3_tag_get_property);
 }
 
-static GstCaps2 *
+static GstCaps *
 gst_id3_tag_get_caps (GstPad *pad)
 {
   GstID3Tag *tag = GST_ID3_TAG (gst_pad_get_parent (pad));
 
   if (tag->found_caps) {
-    GstCaps2 *caps;
-    caps = gst_caps2_from_string ("application/x-gst-tags; application/x-id3");
-    gst_caps2_append (caps, gst_caps2_copy (tag->found_caps));
+    GstCaps *caps;
+    caps = gst_caps_from_string ("application/x-gst-tags; application/x-id3");
+    gst_caps_append (caps, gst_caps_copy (tag->found_caps));
     return caps;
   } else {
-    return gst_caps2_new_any ();
+    return gst_caps_new_any ();
   }
 }
 
@@ -678,7 +678,7 @@ gst_id3_tag_handle_event (GstPad *pad, GstEvent *event)
 }
 typedef struct {
   guint best_probability;
-  GstCaps2 *caps;
+  GstCaps *caps;
   GstBuffer *buffer;
 } SimpleTypeFind;
 guint8 *
@@ -695,16 +695,16 @@ simple_find_peek (gpointer data, gint64 offset, guint size)
   return NULL;
 }
 static void
-simple_find_suggest (gpointer data, guint probability, const GstCaps2 *caps)
+simple_find_suggest (gpointer data, guint probability, const GstCaps *caps)
 {
   SimpleTypeFind *find = (SimpleTypeFind *) data;
 
   if (probability > find->best_probability) {
-    gst_caps2_replace (&find->caps, gst_caps2_copy (caps));
+    gst_caps_replace (&find->caps, gst_caps_copy (caps));
     find->best_probability = probability;
   }
 }
-static GstCaps2 *
+static GstCaps *
 gst_id3_tag_do_typefind (GstID3Tag *tag, GstBuffer *buffer)
 {
   GList *walk, *type_list;
@@ -742,7 +742,7 @@ gst_id3_tag_do_typefind (GstID3Tag *tag, GstBuffer *buffer)
 static gboolean
 gst_id3_tag_do_caps_nego (GstID3Tag *tag, GstBuffer *buffer)
 {
-  GstCaps2 *caps;
+  GstCaps *caps;
 
   if (buffer != NULL) {
     g_assert (tag->found_caps == NULL);
@@ -756,12 +756,12 @@ gst_id3_tag_do_caps_nego (GstID3Tag *tag, GstBuffer *buffer)
     gst_id3_tag_add_src_pad (tag);
 
   do {
-    caps = gst_caps2_new_simple ("application/x-id3", NULL);
+    caps = gst_caps_new_simple ("application/x-id3", NULL);
     if (gst_pad_try_set_caps (tag->srcpad, caps) != GST_PAD_LINK_REFUSED) {
       tag->parse_mode = GST_ID3_TAG_PARSE_WRITE;
       GST_LOG_OBJECT (tag, "normal operation, using application/x-id3 output");
     } else {
-      caps = gst_caps2_new_simple ("application/x-gst-tags", NULL);
+      caps = gst_caps_new_simple ("application/x-gst-tags", NULL);
       if (gst_pad_try_set_caps (tag->srcpad, caps) != GST_PAD_LINK_REFUSED) {
 	tag->parse_mode = GST_ID3_TAG_PARSE_TAG;
 	GST_LOG_OBJECT (tag, "fast operation, just outputting tags");
@@ -771,9 +771,9 @@ gst_id3_tag_do_caps_nego (GstID3Tag *tag, GstBuffer *buffer)
 	  tag->parse_mode = GST_ID3_TAG_PARSE_PARSE;
 	  GST_LOG_OBJECT (tag, "parsing operation, extracting tags"); 
 	} else {
-	  caps = gst_caps2_from_string ("application/x-id3; "
+	  caps = gst_caps_from_string ("application/x-id3; "
               "application/x-gst-tags");
-	  gst_caps2_append (caps, tag->found_caps);
+	  gst_caps_append (caps, tag->found_caps);
 	  if (gst_pad_recover_caps_error (tag->srcpad, caps)) {
 	    tag->parse_mode = GST_ID3_TAG_PARSE_UNKNOWN;
 	    continue;
@@ -1021,7 +1021,7 @@ gst_id3_tag_change_state (GstElement *element)
 	tag->buffer = NULL;
       }
       if (tag->found_caps) {
-	gst_caps2_free (tag->found_caps);
+	gst_caps_free (tag->found_caps);
 	tag->found_caps = NULL;
       }
       tag->parse_mode = GST_ID3_TAG_PARSE_UNKNOWN;

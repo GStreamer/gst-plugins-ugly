@@ -113,7 +113,7 @@ static GstElementStateReturn
 			gst_synaesthesia_change_state	(GstElement *element);
 
 static GstPadLinkReturn 
-			gst_synaesthesia_sink_link 	(GstPad *pad, const GstCaps2 *caps);
+			gst_synaesthesia_sink_link 	(GstPad *pad, const GstCaps *caps);
 
 static GstElementClass *parent_class = NULL;
 
@@ -203,7 +203,7 @@ gst_synaesthesia_init (GstSynaesthesia *synaesthesia)
 }
 
 static GstPadLinkReturn
-gst_synaesthesia_sink_link (GstPad *pad, const GstCaps2 *caps)
+gst_synaesthesia_sink_link (GstPad *pad, const GstCaps *caps)
 {
   GstSynaesthesia *synaesthesia;
   synaesthesia = GST_SYNAESTHESIA (gst_pad_get_parent (pad));

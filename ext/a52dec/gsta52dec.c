@@ -366,7 +366,7 @@ gst_a52dec_reneg (GstPad * pad, int channels, int rate)
   GST_INFO ( "a52dec: reneg channels:%d rate:%d\n", channels, rate);
 
   if (gst_pad_try_set_caps (pad, 
-        gst_caps2_new_simple ("audio/x-raw-int",
+        gst_caps_new_simple ("audio/x-raw-int",
           "endianness",	G_TYPE_INT, G_BYTE_ORDER,
           "signed", 	G_TYPE_BOOLEAN, TRUE,
           "width", 	G_TYPE_INT, 16,

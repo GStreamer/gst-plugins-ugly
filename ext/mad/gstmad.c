@@ -1063,7 +1063,7 @@ gst_mad_chain (GstPad *pad, GstData *_data)
 	/* we set the caps even when the pad is not connected so they
 	 * can be gotten for streaminfo */
         if (gst_pad_try_set_caps (mad->srcpad,
-	    gst_caps2_new_simple ("audio/x-raw-int",
+	    gst_caps_new_simple ("audio/x-raw-int",
 	      "endianness",  G_TYPE_INT, G_BYTE_ORDER,
 	      "signed",      G_TYPE_BOOLEAN, TRUE,
 	      "width",       G_TYPE_INT, 16,

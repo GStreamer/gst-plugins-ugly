@@ -239,7 +239,7 @@ gst_mpeg_parse_update_streaminfo (GstMPEGParse *mpeg_parse)
   GstProps *props;
   GstPropsEntry *entry;
   gboolean mpeg2 = GST_MPEG_PACKETIZE_IS_MPEG2 (mpeg_parse->packetize);
-  GstCaps2 *caps;
+  GstCaps *caps;
 
   props = gst_props_empty_new ();
 
@@ -275,7 +275,7 @@ gst_mpeg_parse_send_data (GstMPEGParse *mpeg_parse, GstData *data, GstClockTime 
       gboolean mpeg2 = GST_MPEG_PACKETIZE_IS_MPEG2 (mpeg_parse->packetize);
 
       if (gst_pad_try_set_caps (mpeg_parse->srcpad,
-	    gst_caps2_new_simple ("video/mpeg",
+	    gst_caps_new_simple ("video/mpeg",
 	      "mpegversion",  G_TYPE_INT,  (mpeg2 ? 2 : 1),
 	      "systemstream", G_TYPE_BOOLEAN, TRUE,
 	      "parsed",       G_TYPE_BOOLEAN, TRUE, NULL)) < 0)
@@ -517,7 +517,7 @@ gst_mpeg_parse_loop (GstElement *element)
       gboolean mpeg2 = GST_MPEG_PACKETIZE_IS_MPEG2 (mpeg_parse->packetize);
 
       if (gst_pad_try_set_caps (mpeg_parse->sinkpad,
-	    gst_caps2_new_simple ("video/mpeg",
+	    gst_caps_new_simple ("video/mpeg",
 	      "mpegversion",  G_TYPE_INT,  (mpeg2 ? 2 : 1),
 	      "systemstream", G_TYPE_BOOLEAN, TRUE,
 	      "parsed",       G_TYPE_BOOLEAN, TRUE, NULL)) < 0)
