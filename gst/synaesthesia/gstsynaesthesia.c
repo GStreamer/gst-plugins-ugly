@@ -40,7 +40,6 @@ struct _GstSynaesthesia {
 
   /* pads */
   GstPad *sinkpad,*srcpad;
-  GstBufferPool *peerpool;
 
   /* the timestamp of the next frame */
   guint64 next_time;
@@ -340,7 +339,6 @@ gst_synaesthesia_change_state (GstElement *element)
   switch (GST_STATE_TRANSITION (element)) {
     case GST_STATE_READY_TO_PAUSED:
       synaesthesia->next_time = 0;
-      synaesthesia->peerpool = NULL;
       synaesthesia->first_buffer = TRUE;
       break;
   }
