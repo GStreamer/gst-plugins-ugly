@@ -28,6 +28,8 @@
 #if MPEG2_RELEASE < MPEG2_VERSION(0,3,2)
 */
 #ifndef MPEG2_RELEASE
+#define MPEG2_VERSION(a,b,c) ((((a)&0xff)<<16)|(((b)&0xff)<<8)|((c)&0xff))
+#define MPEG2_RELEASE MPEG2_VERSION(0,3,1)
 typedef picture_t mpeg2_picture_t;
 typedef gint mpeg2_state_t;
 #define STATE_BUFFER 0
@@ -463,7 +465,11 @@ gst_mpeg2dec_chain (GstPad *pad, GstBuffer *buf)
     GST_DEBUG (0, "have pts: %lld (%lld)", 
 		  mpeg_pts, MPEGTIME_TO_GSTTIME (mpeg_pts));
 
+#if MPEG2_RELEASE >= MPEG2_VERSION(0,4,0)
+    mpeg2_tag_picture (mpeg2dec->decoder, mpeg_pts&0xffffffff, mpeg_pts>>32);
+#else
     mpeg2_pts (mpeg2dec->decoder, mpeg_pts);
+#endif
   }
   else {
     GST_DEBUG (GST_CAT_CLOCK, "no pts");
@@ -551,6 +557,9 @@ gst_mpeg2dec_chain (GstPad *pad, GstBuffer *buf)
         break;
       case STATE_SLICE:
 	slice = TRUE;
+#if MPEG2_RELEASE >= MPEG2_VERSION (0, 4, 0)
+      case STATE_INVALID_END:
+#endif
       case STATE_END:
       {
 	GstBuffer *outbuf = NULL;
@@ -578,8 +587,13 @@ gst_mpeg2dec_chain (GstPad *pad, GstBuffer *buf)
 	  if (mpeg2dec->discont_state == MPEG2DEC_DISC_NEW_KEYFRAME && key_frame)
 	    mpeg2dec->discont_state = MPEG2DEC_DISC_NONE;
 
+#if MPEG2_RELEASE < MPEG2_VERSION(0,4,0)
 	  if (picture->flags & PIC_FLAG_PTS) {
             GstClockTime time = MPEGTIME_TO_GSTTIME (picture->pts);
+#else
+          if (picture->flags & PIC_FLAG_TAGS) {
+            GstClockTime time = MPEGTIME_TO_GSTTIME ((guint64) picture->tag2 << 32 | picture->tag);
+#endif
 
 	    GST_DEBUG (0, "picture had pts %lld", time);
             GST_BUFFER_TIMESTAMP (outbuf) = time;
