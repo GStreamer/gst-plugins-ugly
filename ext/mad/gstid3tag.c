@@ -101,32 +101,21 @@ enum {
   /* FILL ME */
 };
 
-GST_PAD_TEMPLATE_FACTORY (id3_tag_src_template_factory,
+static GstStaticPadTemplate id3_tag_src_template_factory =
+GST_STATIC_PAD_TEMPLATE (
   "src",
   GST_PAD_SRC,
   GST_PAD_ALWAYS,
-  GST_CAPS_NEW (
-    "id3_tag_data_src",
-    "application/x-id3",
-    NULL
-  ),
-  GST_CAPS_NEW (
-    "id3_tag_tag_src",
-    "application/x-gst-tags",
-    NULL
-  )
-)
+  GST_STATIC_CAPS ("application/x-id3; application/x-gst-tags")
+);
 
-GST_PAD_TEMPLATE_FACTORY (id3_tag_sink_template_factory,
+static GstStaticPadTemplate id3_tag_sink_template_factory =
+GST_STATIC_PAD_TEMPLATE (
   "sink",
   GST_PAD_SINK,
   GST_PAD_ALWAYS,
-  GST_CAPS_NEW (
-    "id3_tag_data_sink",
-    "application/x-id3",
-    NULL
-  )
-)
+  GST_STATIC_CAPS ("application/x-id3")
+);
 
 
 static void		gst_id3_tag_base_init		(gpointer		g_class);
@@ -198,9 +187,9 @@ gst_id3_tag_base_init (gpointer g_class)
   gst_element_class_set_details (element_class, &gst_id3_tag_details);
 
   gst_element_class_add_pad_template (element_class,
-		  GST_PAD_TEMPLATE_GET (id3_tag_sink_template_factory));
+		  gst_static_pad_template_get (&id3_tag_sink_template_factory));
   gst_element_class_add_pad_template (element_class,
-		  GST_PAD_TEMPLATE_GET (id3_tag_src_template_factory));
+		  gst_static_pad_template_get (&id3_tag_src_template_factory));
 }
 static void
 gst_id3_tag_class_init (GstID3TagClass *klass)
@@ -234,12 +223,12 @@ gst_id3_tag_init (GstID3Tag *tag)
 {
   /* create the sink and src pads */
   tag->sinkpad = gst_pad_new_from_template(
-		  GST_PAD_TEMPLATE_GET (id3_tag_sink_template_factory), "sink");
+		  gst_static_pad_template_get (&id3_tag_sink_template_factory), "sink");
   gst_element_add_pad (GST_ELEMENT (tag), tag->sinkpad);
   gst_pad_set_chain_function (tag->sinkpad, GST_DEBUG_FUNCPTR (gst_id3_tag_chain));
 
   tag->srcpad = gst_pad_new_from_template(
-		  GST_PAD_TEMPLATE_GET (id3_tag_src_template_factory), "src");
+		  gst_static_pad_template_get (&id3_tag_src_template_factory), "src");
   gst_element_add_pad (GST_ELEMENT (tag), tag->srcpad);
   gst_pad_set_event_function (tag->srcpad, GST_DEBUG_FUNCPTR (gst_id3_tag_src_event));
   gst_pad_set_event_mask_function (tag->srcpad, GST_DEBUG_FUNCPTR (gst_id3_tag_get_event_masks));
@@ -639,26 +628,21 @@ gst_id3_tag_chain (GstPad *pad, GstData *data)
       if (tag->buffer) {
 	tag->buffer = gst_buffer_merge (tag->buffer, buffer);
       } else {
-	GstCaps *caps;
+	GstCaps2 *caps;
       /* do caps nego */
-capsnego:
-	caps = GST_CAPS_NEW ("id3_tag_data_src", "application/x-id3", NULL);
+	caps = gst_caps2_new_simple ("application/x-id3", NULL);
 	if (gst_pad_try_set_caps (tag->srcpad, caps) != GST_PAD_LINK_REFUSED) {
 	  tag->parse_mode = FALSE;
 	  GST_LOG_OBJECT (tag, "normal operation, using application/x-id3 output");
 	} else {
-	  if (gst_pad_try_set_caps (tag->srcpad, 
-				    GST_CAPS_NEW ("id3_tag_tag_src", "application/x-gst-tags", NULL))
+	  if (gst_pad_try_set_caps (tag->srcpad,
+		gst_caps2_new_simple ("application/x-gst-tags", NULL))
 	      != GST_PAD_LINK_REFUSED) {
 	    tag->parse_mode = TRUE;
 	    GST_LOG_OBJECT (tag, "fast operation, just outputting tags");
 	  } else {
-	    GstCaps *caps = gst_pad_template_get_caps (GST_PAD_TEMPLATE_GET (id3_tag_src_template_factory));
-	    if (gst_pad_recover_caps_error (tag->srcpad, caps)) {
-	      goto capsnego;
-	    } else {
-	      return;
-	    }
+	    gst_pad_recover_caps_error (tag->srcpad, caps);
+	    return;
 	  }
 	}
 	/* done caps nego */

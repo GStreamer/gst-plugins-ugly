@@ -88,7 +88,6 @@ struct _GstMpeg2dec {
   gint64	 frame_period;
   gboolean	 need_sequence;
 
-  GstCaps	*streaminfo;
   GstEvent	*pending_event;
 
   GstIndex	*index;
