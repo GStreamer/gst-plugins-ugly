@@ -743,14 +743,6 @@ gst_mad_src_event (GstPad * pad, GstEvent * event)
   mad = GST_MAD (GST_PAD_PARENT (pad));
 
   switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_SEEK_SEGMENT:
-      GST_DEBUG ("forwarding seek event to sink pad");
-      gst_event_ref (event);
-      if (gst_pad_send_event (GST_PAD_PEER (mad->sinkpad), event)) {
-        /* seek worked, we're done, loop will exit */
-        res = TRUE;
-      }
-      break;
       /* the all-formats seek logic */
     case GST_EVENT_SEEK:
       if (mad->index)
@@ -1203,6 +1195,8 @@ gst_mad_chain (GstPad * pad, GstBuffer * buffer)
   mad = GST_MAD (GST_PAD_PARENT (pad));
   g_return_val_if_fail (GST_IS_MAD (mad), GST_FLOW_ERROR);
 
+  GST_STREAM_LOCK (pad);
+
   /* restarts happen on discontinuities, ie. seek, flush, PAUSED to PLAYING */
   if (gst_mad_check_restart (mad))
     GST_DEBUG ("mad restarted");
@@ -1245,7 +1239,8 @@ gst_mad_chain (GstPad * pad, GstBuffer * buffer)
       GST_ELEMENT_ERROR (mad, STREAM, DECODE, (NULL),
           ("mad claims to need more data than %u bytes, we don't have that much",
               MAD_BUFFER_MDLEN * 3));
-      return GST_FLOW_ERROR;
+      result = GST_FLOW_ERROR;
+      goto end;
     }
 
     /* append the chunk to process to our internal temporary buffer */
@@ -1302,7 +1297,8 @@ gst_mad_chain (GstPad * pad, GstBuffer * buffer)
             mad_stream_errorstr (&mad->stream));
         if (!MAD_RECOVERABLE (mad->stream.error)) {
           GST_ELEMENT_ERROR (mad, STREAM, DECODE, (NULL), (NULL));
-          return GST_FLOW_ERROR;
+          result = GST_FLOW_ERROR;
+          goto end;
         } else if (mad->stream.error == MAD_ERROR_LOSTSYNC) {
           /* lost sync, force a resync */
           signed long tagsize;
@@ -1507,6 +1503,7 @@ gst_mad_chain (GstPad * pad, GstBuffer * buffer)
   result = GST_FLOW_OK;
 
 end:
+  GST_STREAM_UNLOCK (pad);
   gst_buffer_unref (buffer);
 
   return result;
@@ -1555,6 +1552,7 @@ gst_mad_change_state (GstElement * element)
     case GST_STATE_PLAYING_TO_PAUSED:
       break;
     case GST_STATE_PAUSED_TO_READY:
+      GST_STREAM_LOCK (mad->sinkpad);
       mad_synth_finish (&mad->synth);
       mad_frame_finish (&mad->frame);
       mad_stream_finish (&mad->stream);
@@ -1563,6 +1561,7 @@ gst_mad_change_state (GstElement * element)
         gst_tag_list_free (mad->tags);
         mad->tags = NULL;
       }
+      GST_STREAM_UNLOCK (mad->sinkpad);
       break;
     case GST_STATE_READY_TO_NULL:
       break;
