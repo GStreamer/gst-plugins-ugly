@@ -1047,7 +1047,6 @@ gst_mad_chain (GstPad *pad, GstBuffer *buffer)
 	else if (mad->stream.error == MAD_ERROR_LOSTSYNC) {
 	  signed long tagsize;
 
-		    g_warning ("mad: querying id3 tag\n");
 	  tagsize = id3_tag_query (mad->stream.this_frame,
 	                          mad->stream.bufend - mad->stream.this_frame);
 
@@ -1068,7 +1067,6 @@ gst_mad_chain (GstPad *pad, GstBuffer *buffer)
 
 	    tag = id3_tag_parse (data, tagsize);
 	    if (tag) {
-		    g_warning ("mad: getting metadata\n");
 	      mad->metadata = id3_to_caps (tag);
 	      id3_tag_delete (tag);
 	      g_object_notify (G_OBJECT (mad), "metadata");
