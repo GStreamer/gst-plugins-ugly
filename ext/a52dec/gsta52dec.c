@@ -443,8 +443,13 @@ gst_a52dec_chain (GstPad * pad, GstData * _data)
     a52dec->time = GST_BUFFER_TIMESTAMP (buf);
   }
   if (a52dec->cache) {
-    buf = gst_buffer_join (a52dec->cache, buf);
+    GstBuffer *new = NULL;
+
+    new = gst_buffer_merge (a52dec->cache, buf);
+    gst_buffer_unref (a52dec->cache);
     a52dec->cache = NULL;
+    gst_buffer_unref (buf);
+    buf = new;
   }
   data = GST_BUFFER_DATA (buf);
   size = GST_BUFFER_SIZE (buf);
