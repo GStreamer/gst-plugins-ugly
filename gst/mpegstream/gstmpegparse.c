@@ -412,6 +412,10 @@ gst_mpeg_parse_loop (GstElement *element)
   gboolean mpeg2;
   GstClockTime time;
 
+  /* maybe later we can make this less fatal, but right now this shouldn't
+   * happen at all */
+  g_assert (GST_IS_ELEMENT (element);
+
   data = gst_mpeg_packetize_read (mpeg_parse->packetize);
 
   id = GST_MPEG_PACKETIZE_ID (mpeg_parse->packetize);
