@@ -21,6 +21,7 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+#include <gst/riff/riff-ids.h>
 #include "gstasfdemux.h"
 #include "asfheaders.h"
 
@@ -450,7 +451,7 @@ gst_asf_demux_process_segment (GstASFDemux       *asf_demux,
   
   if (replic_size > 1) {
     asf_replicated_data *replicated_data_header;
-    guint8              **replicated_data = NULL;
+    guint8              *replicated_data = NULL;
     guint8              *ptr;
 
     segment_info.compressed = FALSE;
@@ -466,7 +467,7 @@ gst_asf_demux_process_segment (GstASFDemux       *asf_demux,
     segment_info.segment_size = GUINT32_FROM_LE (replicated_data_header->object_size);
 
     if (replic_size > 8) {
-      gst_asf_demux_read_object_header_rest (asf_demux, replicated_data, replic_size - 8);
+      gst_asf_demux_read_object_header_rest (asf_demux, &replicated_data, replic_size - 8);
     }
 
     rsize += replic_size;
@@ -1624,7 +1625,6 @@ GST_PLUGIN_DEFINE (
   plugin_init,
   VERSION,
   "LGPL",
-  GST_COPYRIGHT,
   GST_PACKAGE,
   GST_ORIGIN
 )
