@@ -47,6 +47,9 @@ typedef struct _GstId3DemuxBin
 
   /* kids */
   GstElement *demux, *typefind;
+
+  /* intercepted tag events */
+  GList *tag_events;
 } GstId3DemuxBin;
 
 typedef struct _GstId3DemuxBinClass
@@ -131,16 +134,52 @@ gst_id3demux_bin_class_init (GstId3DemuxBinClass * klass)
   GST_ELEMENT_CLASS (klass)->change_state = gst_id3demux_bin_change_state;
 }
 
+static gboolean
+probe_cb (GstProbe * probe, GstData ** p_data, gpointer userdata)
+{
+  GstId3DemuxBin *id3 = GST_ID3DEMUX_BIN (userdata);
+
+  /* we are only interested in tag events that 
+   *  are sent before our ghost src pad exists */
+  if (id3->srcpad == NULL && p_data && *p_data && GST_IS_EVENT (*p_data)) {
+    GstEvent *event = GST_EVENT (*p_data);
+
+    if (GST_EVENT_TYPE (event) == GST_EVENT_TAG) {
+      gst_data_ref (*p_data);
+      id3->tag_events = g_list_append (id3->tag_events, event);
+    }
+  }
+
+  return TRUE;                  /* do not remove data */
+}
+
+
 static void
 gst_id3demux_bin_init (GstId3DemuxBin * id3)
 {
+  GstProbe *probe;
+  GstPad *probe_pad;
+
   id3->demux = gst_element_factory_make ("id3demux", NULL);
   id3->typefind = gst_element_factory_make ("typefind", NULL);
 
   g_signal_connect (id3->typefind, "have-type", G_CALLBACK (found_type), id3);
+
   gst_pad_use_explicit_caps (gst_element_get_pad (id3->typefind, "src"));
+
+  /* we have to intercept tag events that are sent before
+   * typefind is done with its typefinding and then re-send
+   * them after we have created our ghost src pad, otherwise
+   * those events will be discarded by typefind (but even if
+   * they were not, no downstream element would be able to
+   * catch them because we haven't created our src pad yet) */
+  probe_pad = gst_element_get_pad (id3->demux, "src");
+  probe = gst_probe_new (FALSE, probe_cb, id3);
+  gst_pad_add_probe (probe_pad, probe);
+
   gst_element_add_ghost_pad (GST_ELEMENT (id3),
       gst_element_get_pad (id3->demux, "sink"), "sink");
+
   gst_bin_add_many (GST_BIN (id3), id3->demux, id3->typefind, NULL);
   gst_element_link (id3->demux, id3->typefind);
 }
@@ -175,6 +214,17 @@ found_type (GstElement * element, guint probability,
   id3->srcpad = gst_ghost_pad_new ("src",
       gst_element_get_pad (id3->typefind, "src"));
   gst_element_add_pad (GST_ELEMENT (id3), id3->srcpad);
+
+  while (id3->tag_events) {
+    GstEvent *ev = GST_EVENT (id3->tag_events->data);
+
+    GST_LOG ("Forwarding tag event intercepted earlier");
+    /* we are in processing context, so this should be fine
+     * even if it's not our own pad and we are not in a chain
+     * function, at least with our current schedulers */
+    gst_pad_push (GST_PAD (GST_GPAD_REALPAD (id3->srcpad)), GST_DATA (ev));
+    id3->tag_events = g_list_remove (id3->tag_events, ev);
+  }
 }
 
 static GstElementStateReturn
@@ -185,6 +235,9 @@ gst_id3demux_bin_change_state (GstElement * element)
   switch (GST_STATE_TRANSITION (element)) {
     case GST_STATE_PAUSED_TO_READY:
       gst_id3demux_bin_remove_pad (id3);
+      g_list_foreach (id3->tag_events, (GFunc) gst_data_unref, NULL);
+      g_list_free (id3->tag_events);
+      id3->tag_events = NULL;
       break;
     default:
       break;
