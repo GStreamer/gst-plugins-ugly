@@ -1009,9 +1009,13 @@ gst_asf_demux_handle_data (GstASFDemux * asf_demux)
 
   GST_INFO ("Process packet");
 
-  if (asf_demux->packet++ >= asf_demux->num_packets) {
+  if (asf_demux->num_packets > 0 &&
+      asf_demux->packet++ >= asf_demux->num_packets) {
     GstEvent *event;
     guint32 remaining;
+
+    GST_LOG ("Number of packets (%d > %d) reached, EOS",
+        asf_demux->packet - 1, asf_demux->num_packets);
 
     gst_bytestream_flush (asf_demux->bs, 0xFFFFFF);
     gst_bytestream_get_status (asf_demux->bs, &remaining, &event);
@@ -1359,10 +1363,13 @@ gst_asf_demux_process_chunk (GstASFDemux * asf_demux,
   GstBuffer *buffer;
 
   if (!(stream =
-          gst_asf_demux_get_stream (asf_demux, segment_info->stream_number)))
+          gst_asf_demux_get_stream (asf_demux, segment_info->stream_number))) {
+    GST_DEBUG ("Invalid stream number %d", segment_info->stream_number);
     goto done;
+  }
 
-  GST_DEBUG ("Processing chunk of size %u (fo = %d)", segment_info->chunk_size,
+  GST_DEBUG ("Processing %s chunk of size %u (fo = %d)",
+      gst_pad_get_name (stream->pad), segment_info->chunk_size,
       stream->frag_offset);
 
   if (segment_info->frag_offset == 0) {
@@ -1465,7 +1472,6 @@ gst_asf_demux_process_chunk (GstASFDemux * asf_demux,
 
         asf_demux->seek_discont = FALSE;
       }
-
       gst_pad_push (stream->pad, GST_DATA (stream->payload));
     } else {
       gst_buffer_unref (stream->payload);
