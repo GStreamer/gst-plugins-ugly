@@ -560,9 +560,7 @@ gst_mad_chain (GstPad *pad, GstData *dat)
 
       gst_mad_update_info (mad, &mad->frame.header);
 
-      outbuffer = gst_buffer_new ();
-      outdata = (gint16 *) GST_BUFFER_DATA (outbuffer) = g_malloc (nsamples * nchannels * 2);
-      GST_BUFFER_SIZE (outbuffer) = nsamples * nchannels * 2;
+      outbuffer = gst_pad_new_buffer (mad->srcpad, nsamples * nchannels * 2);
 
       if (GST_BUFFER_TIMESTAMP (buffer) != -1) {
         if (GST_BUFFER_TIMESTAMP (buffer) > mad->sync_point) {
@@ -574,6 +572,7 @@ gst_mad_chain (GstPad *pad, GstData *dat)
 					   mad->total_samples * 1000000LL / mad->frame.header.samplerate;
       }
 
+      outdata = GST_BUFFER_DATA (outbuffer);
       /* end of new bit */
       while (nsamples--) {
         /* output sample(s) in 16-bit signed native-endian PCM */
