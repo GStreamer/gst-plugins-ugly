@@ -165,7 +165,8 @@ static gboolean gst_mad_convert_sink (GstPad * pad, GstFormat src_format,
 static gboolean gst_mad_convert_src (GstPad * pad, GstFormat src_format,
     gint64 src_value, GstFormat * dest_format, gint64 * dest_value);
 
-static void gst_mad_chain (GstPad * pad, GstData * _data);
+static gboolean gst_mad_sink_event (GstPad * pad, GstEvent * event);
+static GstFlowReturn gst_mad_chain (GstPad * pad, GstBuffer * buffer);
 
 static GstElementStateReturn gst_mad_change_state (GstElement * element);
 
@@ -324,6 +325,8 @@ gst_mad_init (GstMad * mad)
       (&mad_sink_template_factory), "sink");
   gst_element_add_pad (GST_ELEMENT (mad), mad->sinkpad);
   gst_pad_set_chain_function (mad->sinkpad, GST_DEBUG_FUNCPTR (gst_mad_chain));
+  gst_pad_set_event_function (mad->sinkpad,
+      GST_DEBUG_FUNCPTR (gst_mad_sink_event));
   gst_pad_set_convert_function (mad->sinkpad,
       GST_DEBUG_FUNCPTR (gst_mad_convert_sink));
   gst_pad_set_formats_function (mad->sinkpad,
@@ -345,7 +348,6 @@ gst_mad_init (GstMad * mad)
       GST_DEBUG_FUNCPTR (gst_mad_convert_src));
   gst_pad_set_formats_function (mad->srcpad,
       GST_DEBUG_FUNCPTR (gst_mad_get_formats));
-  gst_pad_use_explicit_caps (mad->srcpad);
 
   mad->tempbuffer = g_malloc (MAD_BUFFER_MDLEN * 3);
   mad->tempsize = 0;
@@ -365,7 +367,6 @@ gst_mad_init (GstMad * mad)
   mad->half = FALSE;
   mad->ignore_crc = TRUE;
   mad->check_for_xing = TRUE;
-  GST_FLAG_SET (mad, GST_ELEMENT_EVENT_AWARE);
 }
 
 static void
@@ -880,17 +881,16 @@ G_STMT_START{							\
         GST_TAG_LAYER, mad->header.layer,
         GST_TAG_MODE, mode->value_nick,
         GST_TAG_EMPHASIS, emphasis->value_nick, NULL);
-    gst_element_found_tags (GST_ELEMENT (mad), list);
-    gst_tag_list_free (list);
+    gst_element_post_message (GST_ELEMENT (mad),
+        gst_message_new_tag (GST_OBJECT (mad), list));
   }
 #undef CHECK_HEADER
 
 }
 
-static void
-gst_mad_handle_event (GstPad * pad, GstBuffer * buffer)
+static gboolean
+gst_mad_sink_event (GstPad * pad, GstEvent * event)
 {
-  GstEvent *event = GST_EVENT (buffer);
   GstMad *mad = GST_MAD (gst_pad_get_parent (pad));
 
   GST_DEBUG ("handling event %d", GST_EVENT_TYPE (event));
@@ -939,7 +939,7 @@ gst_mad_handle_event (GstPad * pad, GstBuffer * buffer)
           if (GST_PAD_IS_USABLE (mad->srcpad)) {
             discont = gst_event_new_discontinuous (FALSE, GST_FORMAT_TIME,
                 time, NULL);
-            gst_pad_push (mad->srcpad, GST_DATA (discont));
+            gst_pad_push_event (mad->srcpad, discont);
           }
           gst_event_unref (event);
           goto done;
@@ -962,6 +962,7 @@ gst_mad_handle_event (GstPad * pad, GstBuffer * buffer)
       gst_pad_event_default (pad, event);
       break;
   }
+  return TRUE;
 }
 
 static gboolean
@@ -1169,6 +1170,8 @@ gst_mad_check_caps_reset (GstMad * mad)
     if (mad->stream.options & MAD_OPTION_HALFSAMPLERATE)
       rate >>= 1;
 
+    /* FIXME see if peer can accept the caps */
+
     /* we set the caps even when the pad is not connected so they
      * can be gotten for streaminfo */
     caps = gst_caps_new_simple ("audio/x-raw-int",
@@ -1178,33 +1181,25 @@ gst_mad_check_caps_reset (GstMad * mad)
         "depth", G_TYPE_INT, 16,
         "rate", G_TYPE_INT, rate, "channels", G_TYPE_INT, nchannels, NULL);
 
-    if (gst_pad_set_explicit_caps (mad->srcpad, caps)) {
-      mad->caps_set = TRUE;     /* set back to FALSE on discont */
-      mad->channels = nchannels;
-      mad->rate = rate;
-    }
-    gst_caps_free (caps);
+    gst_pad_set_caps (mad->srcpad, caps);
+    mad->caps_set = TRUE;       /* set back to FALSE on discont */
+    mad->channels = nchannels;
+    mad->rate = rate;
   }
 }
 
-static void
-gst_mad_chain (GstPad * pad, GstData * _data)
+static GstFlowReturn
+gst_mad_chain (GstPad * pad, GstBuffer * buffer)
 {
-  GstBuffer *buffer = GST_BUFFER (_data);
   GstMad *mad;
   gchar *data;
   glong size;
   gboolean new_pts = FALSE;
   GstClockTime timestamp;
+  GstFlowReturn result = GST_FLOW_OK;
 
   mad = GST_MAD (gst_pad_get_parent (pad));
-  g_return_if_fail (GST_IS_MAD (mad));
-
-  /* handle events */
-  if (GST_IS_EVENT (buffer)) {
-    gst_mad_handle_event (pad, buffer);
-    return;
-  }
+  g_return_val_if_fail (GST_IS_MAD (mad), GST_FLOW_ERROR);
 
   /* restarts happen on discontinuities, ie. seek, flush, PAUSED to PLAYING */
   if (gst_mad_check_restart (mad))
@@ -1248,7 +1243,7 @@ gst_mad_chain (GstPad * pad, GstData * _data)
       GST_ELEMENT_ERROR (mad, STREAM, DECODE, (NULL),
           ("mad claims to need more data than %u bytes, we don't have that much",
               MAD_BUFFER_MDLEN * 3));
-      return;
+      return GST_FLOW_ERROR;
     }
 
     /* append the chunk to process to our internal temporary buffer */
@@ -1305,7 +1300,7 @@ gst_mad_chain (GstPad * pad, GstData * _data)
             mad_stream_errorstr (&mad->stream));
         if (!MAD_RECOVERABLE (mad->stream.error)) {
           GST_ELEMENT_ERROR (mad, STREAM, DECODE, (NULL), (NULL));
-          return;
+          return GST_FLOW_ERROR;
         } else if (mad->stream.error == MAD_ERROR_LOSTSYNC) {
           /* lost sync, force a resync */
           signed long tagsize;
@@ -1336,14 +1331,16 @@ gst_mad_chain (GstPad * pad, GstData * _data)
               list = gst_mad_id3_to_tag_list (tag);
               id3_tag_delete (tag);
               GST_DEBUG ("found tag");
-              gst_element_found_tags (GST_ELEMENT (mad), list);
+              gst_element_post_message (GST_ELEMENT (mad),
+                  gst_message_new_tag (GST_OBJECT (mad),
+                      gst_tag_list_copy (list)));
               if (mad->tags) {
                 gst_tag_list_insert (mad->tags, list, GST_TAG_MERGE_PREPEND);
               } else {
                 mad->tags = gst_tag_list_copy (list);
               }
               if (GST_PAD_IS_USABLE (mad->srcpad)) {
-                gst_pad_push (mad->srcpad, GST_DATA (gst_event_new_tag (list)));
+                gst_pad_push_event (mad->srcpad, gst_event_new_tag (list));
               } else {
                 gst_tag_list_free (list);
               }
@@ -1382,9 +1379,10 @@ gst_mad_chain (GstPad * pad, GstData * _data)
           gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
               GST_TAG_DURATION, (gint64) time * 1000 * 1000 * 1000,
               GST_TAG_BITRATE, bitrate, NULL);
-          gst_element_found_tags (GST_ELEMENT (mad), list);
+          gst_element_post_message (GST_ELEMENT (mad),
+              gst_message_new_tag (GST_OBJECT (mad), gst_tag_list_copy (list)));
           if (GST_PAD_IS_USABLE (mad->srcpad)) {
-            gst_pad_push (mad->srcpad, GST_DATA (gst_event_new_tag (list)));
+            gst_pad_push_event (mad->srcpad, gst_event_new_tag (list));
           } else {
             gst_tag_list_free (list);
           }
@@ -1440,7 +1438,10 @@ gst_mad_chain (GstPad * pad, GstData * _data)
         left_ch = mad->synth.pcm.samples[0];
         right_ch = mad->synth.pcm.samples[1];
 
-        outbuffer = gst_buffer_new_and_alloc (nsamples * mad->channels * 2);
+        /* will attach the caps to the buffer */
+        outbuffer =
+            gst_pad_alloc_buffer (mad->srcpad, 0, nsamples * mad->channels * 2,
+            GST_PAD_CAPS (mad->srcpad));
         outdata = (gint16 *) GST_BUFFER_DATA (outbuffer);
 
         GST_BUFFER_TIMESTAMP (outbuffer) = time_offset;
@@ -1463,7 +1464,10 @@ gst_mad_chain (GstPad * pad, GstData * _data)
           }
         }
 
-        gst_pad_push (mad->srcpad, GST_DATA (outbuffer));
+        result = gst_pad_push (mad->srcpad, outbuffer);
+        if (result != GST_FLOW_OK) {
+          goto end;
+        }
       }
 
       mad->total_samples += nsamples;
@@ -1498,9 +1502,12 @@ gst_mad_chain (GstPad * pad, GstData * _data)
     /* we only get here from breaks, tempsize never actually drops below 0 */
     memmove (mad->tempbuffer, mad_input_buffer, mad->tempsize);
   }
+  result = GST_FLOW_OK;
 
 end:
   gst_buffer_unref (buffer);
+
+  return result;
 }
 
 static GstElementStateReturn

@@ -166,9 +166,9 @@ static const GstQueryType *gst_id3_tag_get_query_types (GstPad * pad);
 static gboolean gst_id3_tag_src_query (GstPad * pad,
     GstQueryType type, GstFormat * format, gint64 * value);
 
-static void gst_id3_tag_chain (GstPad * pad, GstData * data);
-static GstPadLinkReturn gst_id3_tag_src_link (GstPad * pad,
-    const GstCaps * caps);
+static gboolean gst_id3_tag_sink_event (GstPad * pad, GstEvent * event);
+static GstFlowReturn gst_id3_tag_chain (GstPad * pad, GstBuffer * buffer);
+static GstPadLinkReturn gst_id3_tag_src_link (GstPad * pad, GstPad * peer);
 
 static GstElementStateReturn gst_id3_tag_change_state (GstElement * element);
 
@@ -249,6 +249,9 @@ gst_id3_tag_class_init (gpointer g_class, gpointer class_data)
         &gst_id3_tag_details[tag_class->type - 1]);
   }
 
+  gobject_class->set_property = GST_DEBUG_FUNCPTR (gst_id3_tag_set_property);
+  gobject_class->get_property = GST_DEBUG_FUNCPTR (gst_id3_tag_get_property);
+
   if (tag_class->type & GST_ID3_TAG_PARSE_DEMUX) {
     g_object_class_install_property (gobject_class, ARG_PREFER_V1,
         g_param_spec_boolean ("prefer-v1", "prefer version 1 tag",
@@ -278,9 +281,6 @@ gst_id3_tag_class_init (gpointer g_class, gpointer class_data)
     gst_element_class_add_pad_template (gstelement_class,
         gst_static_pad_template_get (&id3_tag_sink_id3_template_factory));
   }
-
-  gobject_class->set_property = GST_DEBUG_FUNCPTR (gst_id3_tag_set_property);
-  gobject_class->get_property = GST_DEBUG_FUNCPTR (gst_id3_tag_get_property);
 }
 
 static GstCaps *
@@ -334,6 +334,8 @@ gst_id3_tag_init (GTypeInstance * instance, gpointer g_class)
         gst_pad_new_from_template (gst_element_class_get_pad_template
         (GST_ELEMENT_CLASS (g_class), "sink"), "sink");
     gst_element_add_pad (GST_ELEMENT (tag), tag->sinkpad);
+    gst_pad_set_event_function (tag->sinkpad,
+        GST_DEBUG_FUNCPTR (gst_id3_tag_sink_event));
     gst_pad_set_chain_function (tag->sinkpad,
         GST_DEBUG_FUNCPTR (gst_id3_tag_chain));
   }
@@ -344,9 +346,8 @@ gst_id3_tag_init (GTypeInstance * instance, gpointer g_class)
   /* FIXME: for the alli^H^H^H^Hspider - gst_id3_tag_add_src_pad (tag); */
   tag->parse_mode = GST_ID3_TAG_PARSE_BASE;
   tag->buffer = NULL;
-
-  GST_FLAG_SET (tag, GST_ELEMENT_EVENT_AWARE);
 }
+
 static void
 gst_id3_tag_set_property (GObject * object, guint prop_id, const GValue * value,
     GParamSpec * pspec)
@@ -782,8 +783,9 @@ gst_id3_tag_get_tag_to_render (GstID3Tag * tag)
   }
   return ret;
 }
-static void
-gst_id3_tag_handle_event (GstPad * pad, GstEvent * event)
+
+static gboolean
+gst_id3_tag_sink_event (GstPad * pad, GstEvent * event)
 {
   GstID3Tag *tag = GST_ID3_TAG (gst_pad_get_parent (pad));
 
@@ -847,7 +849,7 @@ gst_id3_tag_handle_event (GstPad * pad, GstEvent * event)
             new =
                 gst_event_new_discontinuous (FALSE, GST_FORMAT_BYTES, value, 0);
             gst_data_unref (GST_DATA (event));
-            gst_pad_push (tag->srcpad, GST_DATA (new));
+            gst_pad_push_event (tag->srcpad, new);
           } else {
             gst_pad_event_default (pad, event);
           }
@@ -882,7 +884,7 @@ gst_id3_tag_handle_event (GstPad * pad, GstEvent * event)
             tag_buffer = gst_buffer_new_and_alloc (128);
             if (128 != id3_tag_render (id3, tag_buffer->data))
               g_assert_not_reached ();
-            gst_pad_push (tag->srcpad, GST_DATA (tag_buffer));
+            gst_pad_push (tag->srcpad, tag_buffer);
             id3_tag_delete (id3);
           }
           gst_tag_list_free (merged);
@@ -893,7 +895,7 @@ gst_id3_tag_handle_event (GstPad * pad, GstEvent * event)
       gst_pad_event_default (pad, event);
       break;
   }
-  return;
+  return TRUE;
 }
 typedef struct
 {
@@ -978,18 +980,21 @@ gst_id3_tag_do_caps_nego (GstID3Tag * tag, GstBuffer * buffer)
     return TRUE;
   } else {
     GST_DEBUG_OBJECT (tag, "renegotiating");
-    return gst_pad_renegotiate (tag->srcpad) != GST_PAD_LINK_REFUSED;
+    //return gst_pad_renegotiate (tag->srcpad) != GST_PAD_LINK_REFUSED;
+    return TRUE;
   }
 }
 
 static GstPadLinkReturn
-gst_id3_tag_src_link (GstPad * pad, const GstCaps * caps)
+gst_id3_tag_src_link (GstPad * pad, GstPad * peer)
 {
   GstID3Tag *tag;
-  const gchar *mimetype;
+
+  //const gchar *mimetype;
 
   tag = GST_ID3_TAG (gst_pad_get_parent (pad));
 
+#if 0
   if (!tag->found_caps && CAN_BE_DEMUXER (tag))
     return GST_PAD_LINK_DELAYED;
   if (!CAN_BE_MUXER (tag) || !CAN_BE_DEMUXER (tag)) {
@@ -1009,8 +1014,8 @@ gst_id3_tag_src_link (GstPad * pad, const GstCaps * caps)
     tag->parse_mode = GST_ID3_TAG_PARSE_DEMUX;
     GST_LOG_OBJECT (tag, "parsing operation, extracting tags");
   }
-
-  return GST_PAD_LINK_OK;
+#endif
+  return GST_RPAD_LINKFUNC (peer) (peer, pad);
 }
 static void
 gst_id3_tag_send_tag_event (GstID3Tag * tag)
@@ -1020,26 +1025,20 @@ gst_id3_tag_send_tag_event (GstID3Tag * tag)
       GST_TAG_MERGE_KEEP);
 
   if (tag->parsed_tags)
-    gst_element_found_tags (GST_ELEMENT (tag), tag->parsed_tags);
+    gst_element_post_message (GST_ELEMENT (tag),
+        gst_message_new_tag (GST_OBJECT (tag), tag->parsed_tags));
+
   if (merged) {
     GstEvent *event = gst_event_new_tag (merged);
 
     GST_EVENT_TIMESTAMP (event) = 0;
-    gst_pad_push (tag->srcpad, GST_DATA (event));
+    gst_pad_push_event (tag->srcpad, event);
   }
 }
-static void
-gst_id3_tag_chain (GstPad * pad, GstData * data)
+static GstFlowReturn
+gst_id3_tag_chain (GstPad * pad, GstBuffer * buffer)
 {
   GstID3Tag *tag;
-  GstBuffer *buffer;
-
-  /* handle events */
-  if (GST_IS_EVENT (data)) {
-    gst_id3_tag_handle_event (pad, GST_EVENT (data));
-    return;
-  }
-  buffer = GST_BUFFER (data);
 
   tag = GST_ID3_TAG (gst_pad_get_parent (pad));
 
@@ -1048,7 +1047,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
     case GST_ID3_TAG_STATE_SEEKING_TO_NORMAL:
       /* we're waiting for the seek to finish, just discard all the stuff */
       gst_data_unref (GST_DATA (buffer));
-      return;
+      return GST_FLOW_OK;
     case GST_ID3_TAG_STATE_READING_V1_TAG:
       if (tag->buffer) {
         GstBuffer *temp;
@@ -1062,7 +1061,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
         tag->v1tag_offset = buffer->offset;
       }
       if (GST_BUFFER_SIZE (tag->buffer) < 128)
-        return;
+        return GST_FLOW_OK;
       g_assert (tag->v1tag_size == 0);
       tag->v1tag_size = id3_tag_query (GST_BUFFER_DATA (tag->buffer),
           GST_BUFFER_SIZE (tag->buffer));
@@ -1110,10 +1109,10 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
         /* set eos, we're done parsing tags */
         GST_LOG_OBJECT (tag, "setting EOS after reading ID3v1 tag");
         gst_id3_tag_set_state (tag, GST_ID3_TAG_STATE_NORMAL);
-        gst_element_set_eos (GST_ELEMENT (tag));
-        gst_pad_push (tag->srcpad, GST_DATA (gst_event_new (GST_EVENT_EOS)));
+        //gst_element_set_eos (GST_ELEMENT (tag));
+        gst_pad_push_event (tag->srcpad, gst_event_new (GST_EVENT_EOS));
       }
-      return;
+      return GST_FLOW_OK;
     case GST_ID3_TAG_STATE_READING_V2_TAG:
       if (tag->buffer) {
         GstBuffer *temp;
@@ -1126,7 +1125,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
         tag->buffer = buffer;
       }
       if (GST_BUFFER_SIZE (tag->buffer) < 10)
-        return;
+        return GST_FLOW_OK;
       if (tag->v2tag_size == 0) {
         tag->v2tag_size = id3_tag_query (GST_BUFFER_DATA (tag->buffer),
             GST_BUFFER_SIZE (tag->buffer));
@@ -1135,7 +1134,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
           tag->v2tag_size = 0;
       }
       if (GST_BUFFER_SIZE (tag->buffer) < tag->v2tag_size + ID3_TYPE_FIND_SIZE)
-        return;
+        return GST_FLOW_OK;
       if (tag->v2tag_size != 0) {
         struct id3_tag *v2tag;
 
@@ -1172,14 +1171,14 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
       tag->buffer = NULL;
       if (tag->found_caps == NULL)
         if (!gst_id3_tag_do_caps_nego (tag, buffer))
-          return;
+          return GST_FLOW_OK;
       /* seek to ID3v1 tag */
       if (gst_pad_send_event (GST_PAD_PEER (tag->sinkpad),
               gst_event_new_seek (GST_FORMAT_BYTES | GST_SEEK_METHOD_END |
                   GST_SEEK_FLAG_FLUSH, -128))) {
         gst_id3_tag_set_state (tag, GST_ID3_TAG_STATE_SEEKING_TO_V1_TAG);
         gst_data_unref (GST_DATA (buffer));
-        return;
+        return GST_FLOW_OK;
       }
       gst_id3_tag_set_state (tag, GST_ID3_TAG_STATE_NORMAL_START);
       /* fall through */
@@ -1206,7 +1205,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
                 id3_tag_render (id3, GST_BUFFER_DATA (tag_buffer));
             g_assert (estimated >= tag->v2tag_size_new);
             GST_BUFFER_SIZE (tag_buffer) = tag->v2tag_size_new;
-            gst_pad_push (tag->srcpad, GST_DATA (tag_buffer));
+            gst_pad_push (tag->srcpad, tag_buffer);
             id3_tag_delete (id3);
           }
           gst_tag_list_free (merged);
@@ -1222,13 +1221,13 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
     case GST_ID3_TAG_STATE_NORMAL:
       if (tag->parse_mode == GST_ID3_TAG_PARSE_ANY) {
         gst_data_unref (GST_DATA (buffer));
-        gst_element_set_eos (GST_ELEMENT (tag));
-        gst_pad_push (tag->srcpad, GST_DATA (gst_event_new (GST_EVENT_EOS)));
+        //gst_element_set_eos (GST_ELEMENT (tag));
+        gst_pad_push_event (tag->srcpad, gst_event_new (GST_EVENT_EOS));
       } else {
         if (GST_BUFFER_OFFSET_IS_VALID (buffer)) {
           if (buffer->offset >= tag->v1tag_offset) {
             gst_data_unref (GST_DATA (buffer));
-            return;
+            return GST_FLOW_OK;
           } else if (buffer->offset + buffer->size > tag->v1tag_offset) {
             GstBuffer *sub = gst_buffer_create_sub (buffer, 0,
                 buffer->size - 128);
@@ -1251,11 +1250,11 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
           gst_data_unref (GST_DATA (buffer));
           buffer = sub;
         }
-        gst_pad_push (tag->srcpad, GST_DATA (buffer));
+        gst_pad_push (tag->srcpad, buffer);
       }
-      return;
+      return GST_FLOW_OK;
   }
-  g_assert_not_reached ();
+  return GST_FLOW_OK;
 }
 
 static GstElementStateReturn
@@ -1298,7 +1297,7 @@ gst_id3_tag_change_state (GstElement * element)
         tag->buffer = NULL;
       }
       if (tag->found_caps) {
-        gst_caps_free (tag->found_caps);
+        gst_caps_unref (tag->found_caps);
         tag->found_caps = NULL;
       }
       tag->parse_mode = GST_ID3_TAG_PARSE_BASE;

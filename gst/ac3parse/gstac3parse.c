@@ -113,7 +113,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 static void gst_ac3parse_class_init (gpointer g_class);
 static void gst_ac3parse_init (GstAc3Parse * ac3parse);
 
-static void gst_ac3parse_chain (GstPad * pad, GstData * data);
+static GstFlowReturn gst_ac3parse_chain (GstPad * pad, GstBuffer * buffer);
 
 static void gst_ac3parse_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec);
@@ -167,12 +167,12 @@ gst_ac3parse_class_init (gpointer g_class)
       gst_static_pad_template_get (&gst_ac3parse_sink_template));
   gst_element_class_set_details (gstelement_class, &ac3parse_details);
 
+  gobject_class->set_property = gst_ac3parse_set_property;
+  gobject_class->get_property = gst_ac3parse_get_property;
+
   g_object_class_install_property (G_OBJECT_CLASS (klass), ARG_SKIP, g_param_spec_int ("skip", "skip", "skip", G_MININT, G_MAXINT, 0, G_PARAM_READWRITE));      /* CHECKME */
 
   parent_class = g_type_class_ref (GST_TYPE_ELEMENT);
-
-  gobject_class->set_property = gst_ac3parse_set_property;
-  gobject_class->get_property = gst_ac3parse_get_property;
 
   gstelement_class->change_state = gst_ac3parse_change_state;
 }
@@ -189,7 +189,6 @@ gst_ac3parse_init (GstAc3Parse * ac3parse)
   ac3parse->srcpad =
       gst_pad_new_from_template (gst_static_pad_template_get
       (&gst_ac3parse_src_template), "src");
-  gst_pad_use_explicit_caps (ac3parse->srcpad);
   gst_element_add_pad (GST_ELEMENT (ac3parse), ac3parse->srcpad);
 
   ac3parse->partialbuf = NULL;
@@ -198,10 +197,9 @@ gst_ac3parse_init (GstAc3Parse * ac3parse)
   ac3parse->sample_rate = ac3parse->channels = -1;
 }
 
-static void
-gst_ac3parse_chain (GstPad * pad, GstData * _data)
+static GstFlowReturn
+gst_ac3parse_chain (GstPad * pad, GstBuffer * buf)
 {
-  GstBuffer *buf = GST_BUFFER (_data);
   GstAc3Parse *ac3parse;
   guchar *data;
   glong size, offset = 0;
@@ -210,11 +208,7 @@ gst_ac3parse_chain (GstPad * pad, GstData * _data)
   GstBuffer *outbuf = NULL;
   gint bpf;
   guint sample_rate = -1, channels = -1;
-
-  g_return_if_fail (pad != NULL);
-  g_return_if_fail (GST_IS_PAD (pad));
-  g_return_if_fail (buf != NULL);
-/*  g_return_if_fail(GST_IS_BUFFER(buf)); */
+  GstFlowReturn result = GST_FLOW_OK;
 
   ac3parse = GST_AC3PARSE (GST_OBJECT_PARENT (pad));
   GST_DEBUG ("ac3parse: received buffer of %d bytes", GST_BUFFER_SIZE (buf));
@@ -343,14 +337,18 @@ gst_ac3parse_chain (GstPad * pad, GstData * _data)
           newcaps = gst_caps_new_simple ("audio/x-ac3",
               "channels", G_TYPE_INT, channels,
               "rate", G_TYPE_INT, sample_rate, NULL);
-          gst_pad_set_explicit_caps (ac3parse->srcpad, newcaps);
+          GST_PAD_CAPS (ac3parse->srcpad) = newcaps;
         }
+        GST_BUFFER_CAPS (outbuf) = GST_PAD_CAPS (ac3parse->srcpad);
 
         offset += bpf;
         if (ac3parse->skip == 0 && GST_PAD_IS_LINKED (ac3parse->srcpad)) {
           GST_DEBUG ("ac3parse: pushing buffer of %d bytes",
               GST_BUFFER_SIZE (outbuf));
-          gst_pad_push (ac3parse->srcpad, GST_DATA (outbuf));
+          result = gst_pad_push (ac3parse->srcpad, outbuf);
+          if (result != GST_FLOW_OK) {
+            goto end;
+          }
         } else {
           GST_DEBUG ("ac3parse: skipping buffer of %d bytes",
               GST_BUFFER_SIZE (outbuf));
@@ -363,6 +361,7 @@ gst_ac3parse_chain (GstPad * pad, GstData * _data)
       fprintf (stderr, "ac3parse: *** wrong header, skipping byte (FIXME?)\n");
     }
   }
+end:
   /* if we have processed this block and there are still */
   /* bytes left not in a partial block, copy them over. */
   if (size - offset > 0) {
@@ -375,6 +374,8 @@ gst_ac3parse_chain (GstPad * pad, GstData * _data)
     gst_buffer_unref (ac3parse->partialbuf);
     ac3parse->partialbuf = outbuf;
   }
+
+  return result;
 }
 
 static void
