@@ -417,6 +417,10 @@ gst_mpeg_parse_loop (GstElement *element)
   g_assert (GST_IS_ELEMENT (element));
 
   data = gst_mpeg_packetize_read (mpeg_parse->packetize);
+  if (data == NULL) {
+    g_warning ("gst_mpeg_packetize_read returned a NULL buffer, not good !");
+    return;
+  }
 
   id = GST_MPEG_PACKETIZE_ID (mpeg_parse->packetize);
   mpeg2 = GST_MPEG_PACKETIZE_IS_MPEG2 (mpeg_parse->packetize);
