@@ -71,7 +71,7 @@ parse_packhead (GstMPEGPacketize * packetize)
   GST_DEBUG (0, "code %02x", *buf);
 
   /* start parsing the stream */
-  if ((*buf & 0xf0) == 0x40) {
+  if ((*buf & 0xc0) == 0x40) {
     GST_DEBUG (0, "packetize::parse_packhead setting mpeg2");
     packetize->MPEG2 = TRUE;
     length += 2;
