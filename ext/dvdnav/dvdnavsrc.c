@@ -433,7 +433,7 @@ dvdnavsrc_tca_seek(DVDNavSrc *src, int title, int chapter, int angle)
 
   /**
    * Before we can get the number of chapters (programs) we need to call
-   * dvdnav_title_play so that dvdnav_get_number_of_programs knows which title
+   * dvdnav_title_play so that dvdnav_get_number_of_parts knows which title
    * to operate on (also needed to get the number of angles)
    */
   if (dvdnav_title_play (src->dvdnav, title) != DVDNAV_STATUS_OK) {
@@ -445,8 +445,8 @@ dvdnavsrc_tca_seek(DVDNavSrc *src, int title, int chapter, int angle)
   /**
    * Make sure the chapter number is valid for this title.
    */
-  if (dvdnav_get_number_of_programs (src->dvdnav, &programs) != DVDNAV_STATUS_OK) {
-    fprintf( stderr, "dvdnav_get_number_of_programs error: %s\n", dvdnav_err_to_string(src->dvdnav));
+  if (dvdnav_get_number_of_parts (src->dvdnav, title, &programs) != DVDNAV_STATUS_OK) {
+    fprintf( stderr, "dvdnav_get_number_of_parts error: %s\n", dvdnav_err_to_string(src->dvdnav));
     return FALSE;
   }
   fprintf (stderr, "There are %d chapters in this title.\n", programs);
@@ -775,7 +775,9 @@ dvdnavsrc_print_event (DVDNavSrc *src, guint8 *data, int event, int len)
       break;
     case DVDNAV_CELL_CHANGE:
       {
+        /*
         dvdnav_cell_change_event_t *event = (dvdnav_cell_change_event_t *)data;
+        */
         /*fprintf (stderr, "  old_cell: %p\n", event->old_cell);*/
         /*fprintf (stderr, "  new_cell: %p\n", event->new_cell);*/
       }
@@ -1148,7 +1150,7 @@ dvdnavsrc_event (GstPad *pad, GstEvent *event)
                 new_part = part + offset;
                 break;
               case GST_SEEK_METHOD_END:
-                if (dvdnav_get_number_of_programs(src->dvdnav, &parts) !=
+                if (dvdnav_get_number_of_parts(src->dvdnav, title, &parts) !=
                     DVDNAV_STATUS_OK) {
                   goto error;
                 }
@@ -1391,7 +1393,10 @@ dvdnavsrc_query (GstPad *pad, GstQueryType type,
         }
         *value = titles;
       } else if (*format == chapter_format) {
-        if (dvdnav_get_number_of_programs(src->dvdnav, &parts) != DVDNAV_STATUS_OK) {
+        if (dvdnav_current_title_info(src->dvdnav, &title, &part) != DVDNAV_STATUS_OK) {
+          res = FALSE;
+        }
+	if (res != FALSE && dvdnav_get_number_of_parts(src->dvdnav, title, &parts) != DVDNAV_STATUS_OK) {
           res = FALSE;
         }
         *value = parts;
