@@ -436,7 +436,7 @@ gst_mad_convert_sink (GstPad * pad, GstFormat src_format, gint64 src_value,
   gboolean res = TRUE;
   GstMad *mad;
 
-  mad = GST_MAD (gst_pad_get_parent (pad));
+  mad = GST_MAD (GST_PAD_PARENT (pad));
 
   if (mad->vbr_average == 0)
     return FALSE;
@@ -477,7 +477,7 @@ gst_mad_convert_src (GstPad * pad, GstFormat src_format, gint64 src_value,
   gint bytes_per_sample;
   GstMad *mad;
 
-  mad = GST_MAD (gst_pad_get_parent (pad));
+  mad = GST_MAD (GST_PAD_PARENT (pad));
 
   bytes_per_sample = MAD_NCHANNELS (&mad->frame.header) << 1;
 
@@ -554,7 +554,7 @@ gst_mad_src_query (GstPad * pad, GstQueryType type,
   gboolean res = TRUE;
   GstMad *mad;
 
-  mad = GST_MAD (gst_pad_get_parent (pad));
+  mad = GST_MAD (GST_PAD_PARENT (pad));
 
   switch (type) {
     case GST_QUERY_TOTAL:
@@ -740,7 +740,7 @@ gst_mad_src_event (GstPad * pad, GstEvent * event)
   gboolean res = TRUE;
   GstMad *mad;
 
-  mad = GST_MAD (gst_pad_get_parent (pad));
+  mad = GST_MAD (GST_PAD_PARENT (pad));
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_SEEK_SEGMENT:
@@ -891,7 +891,7 @@ G_STMT_START{							\
 static gboolean
 gst_mad_sink_event (GstPad * pad, GstEvent * event)
 {
-  GstMad *mad = GST_MAD (gst_pad_get_parent (pad));
+  GstMad *mad = GST_MAD (GST_PAD_PARENT (pad));
 
   GST_DEBUG ("handling event %d", GST_EVENT_TYPE (event));
   switch (GST_EVENT_TYPE (event)) {
@@ -1198,7 +1198,7 @@ gst_mad_chain (GstPad * pad, GstBuffer * buffer)
   GstClockTime timestamp;
   GstFlowReturn result = GST_FLOW_OK;
 
-  mad = GST_MAD (gst_pad_get_parent (pad));
+  mad = GST_MAD (GST_PAD_PARENT (pad));
   g_return_val_if_fail (GST_IS_MAD (mad), GST_FLOW_ERROR);
 
   /* restarts happen on discontinuities, ie. seek, flush, PAUSED to PLAYING */
