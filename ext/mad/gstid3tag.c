@@ -1020,6 +1020,7 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
 {
   GstID3Tag *tag;
   GstBuffer *buffer;
+  GstTagList *newtag;
 
   /* handle events */
   if (GST_IS_EVENT (data)) {
@@ -1051,33 +1052,21 @@ gst_id3_tag_chain (GstPad * pad, GstData * data)
       if (GST_BUFFER_SIZE (tag->buffer) < 128)
         return;
       g_assert (tag->v1tag_size == 0);
-      tag->v1tag_size = id3_tag_query (GST_BUFFER_DATA (tag->buffer),
-          GST_BUFFER_SIZE (tag->buffer));
-      if (tag->v1tag_size == 128) {
-        GstTagList *newtag;
-
-        newtag = gst_tag_list_new_from_id3v1 (GST_BUFFER_DATA (tag->buffer));
+      newtag = gst_tag_list_new_from_id3v1 (GST_BUFFER_DATA (tag->buffer));
+      if (newtag) {
+        tag->v1tag_size = 128;
         GST_LOG_OBJECT (tag, "have read ID3v1 tag");
-        if (newtag) {
-          if (tag->parsed_tags) {
-            /* FIXME: use append/prepend here ? */
-            gst_tag_list_insert (tag->parsed_tags, newtag,
-                tag->prefer_v1tag ? GST_TAG_MERGE_REPLACE : GST_TAG_MERGE_KEEP);
-            gst_tag_list_free (newtag);
-          } else {
-            tag->parsed_tags = newtag;
-          }
+        if (tag->parsed_tags) {
+          /* FIXME: use append/prepend here ? */
+          gst_tag_list_insert (tag->parsed_tags, newtag,
+              tag->prefer_v1tag ? GST_TAG_MERGE_REPLACE : GST_TAG_MERGE_KEEP);
+          gst_tag_list_free (newtag);
         } else {
-          GST_WARNING_OBJECT (tag, "detected ID3v1 tag, but couldn't parse it");
+          tag->parsed_tags = newtag;
         }
       } else {
-        if (tag->v1tag_size != 0) {
-          GST_WARNING_OBJECT (tag, "bad non-ID3v1 tag at end of file");
-        } else {
-          GST_LOG_OBJECT (tag, "no ID3v1 tag (%" G_GUINT64_FORMAT ")",
-              GST_BUFFER_OFFSET (tag->buffer));
-          tag->v1tag_offset = G_MAXUINT64;
-        }
+        GST_WARNING_OBJECT (tag, "no ID3v1 tag at end of file");
+        tag->v1tag_offset = G_MAXUINT64;
       }
       gst_data_unref (GST_DATA (tag->buffer));
       tag->buffer = NULL;
