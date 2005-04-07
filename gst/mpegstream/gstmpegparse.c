@@ -52,7 +52,7 @@ static GstElementDetails mpeg_parse_details = {
 
 #define CLASS(o)	GST_MPEG_PARSE_CLASS (G_OBJECT_GET_CLASS (o))
 
-#define DEFAULT_MAX_DISCONT	45000
+#define DEFAULT_MAX_DISCONT	120000
 
 /* GstMPEGParse signals and args */
 enum
@@ -96,6 +96,7 @@ static gboolean gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse,
 
 static void gst_mpeg_parse_handle_discont (GstMPEGParse * mpeg_parse,
     GstEvent * event);
+static void gst_mpeg_parse_reset (GstMPEGParse * mpeg_parse);
 
 static void gst_mpeg_parse_send_data (GstMPEGParse * mpeg_parse, GstData * data,
     GstClockTime time);
@@ -249,6 +250,8 @@ gst_mpeg_parse_init (GstMPEGParse * mpeg_parse)
   mpeg_parse->use_adjust = TRUE;
 
   GST_FLAG_SET (mpeg_parse, GST_ELEMENT_EVENT_AWARE);
+
+  gst_mpeg_parse_reset (mpeg_parse);
 }
 
 static void
@@ -505,6 +508,9 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
         G_GINT64_FORMAT, mpeg_parse->next_scr, mpeg_parse->current_scr,
         mpeg_parse->current_scr + mpeg_parse->adjust, mpeg_parse->adjust);
 
+    mpeg_parse->first_scr = MP_INVALID_SCR;
+    mpeg_parse->last_scr = MP_INVALID_SCR;
+
     if (mpeg_parse->do_adjust) {
       if (mpeg_parse->use_adjust) {
         mpeg_parse->adjust +=
@@ -524,7 +530,7 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
         GST_FORMAT_TIME, MPEGTIME_TO_GSTTIME (mpeg_parse->current_scr), 0);
   }
 
-  if (mpeg_parse->current_scr > prev_scr) {
+  if ((mpeg_parse->current_scr > prev_scr) && (diff < mpeg_parse->max_discont)) {
     mpeg_parse->avg_bitrate_time +=
         MPEGTIME_TO_GSTTIME (mpeg_parse->current_scr - prev_scr);
     mpeg_parse->avg_bitrate_bytes += mpeg_parse->bytes_since_scr;
@@ -544,18 +550,18 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
         mpeg_parse->bytes_since_scr / 1024.0);
   }
 
-  if (mpeg_parse->avg_bitrate_bytes > MP_MAX_VALID_BSS) {
-    mpeg_parse->avg_bitrate_bytes = 0;
-    mpeg_parse->avg_bitrate_time = 0;
-  }
-  mpeg_parse->bytes_since_scr = 0;
-
   if (mpeg_parse->avg_bitrate_bytes) {
     GST_DEBUG ("stream avg is %1.3fMbs, calculated over %1.3fkB",
         (float) (mpeg_parse->avg_bitrate_bytes) * 8 * GST_SECOND
         / mpeg_parse->avg_bitrate_time / 1048576.0,
         mpeg_parse->avg_bitrate_bytes / 1024.0);
   }
+
+  if (mpeg_parse->avg_bitrate_bytes > MP_MAX_VALID_BSS) {
+    mpeg_parse->avg_bitrate_bytes = 0;
+    mpeg_parse->avg_bitrate_time = 0;
+  }
+  mpeg_parse->bytes_since_scr = 0;
 
   return TRUE;
 }
@@ -680,7 +686,10 @@ gst_mpeg_parse_loop (GstElement * element)
 
       scr = mpeg_parse->current_scr;
       bss = mpeg_parse->bytes_since_scr;
-      br = mpeg_parse->mux_rate;
+      if (mpeg_parse->scr_rate != 0)
+        br = mpeg_parse->scr_rate;
+      else
+        br = mpeg_parse->mux_rate;
 
       if (br) {
         if (GST_MPEG_PACKETIZE_IS_MPEG2 (mpeg_parse->packetize)) {
@@ -742,6 +751,7 @@ gst_mpeg_parse_get_rate (GstMPEGParse * mpeg_parse, gint64 * rate)
     *rate = GST_SECOND * total_bytes / total_time;
     return TRUE;
   }
+  *rate = 0;
 
   if ((mpeg_parse->first_scr != MP_INVALID_SCR) &&
       (mpeg_parse->last_scr != MP_INVALID_SCR) &&
@@ -751,31 +761,30 @@ gst_mpeg_parse_get_rate (GstMPEGParse * mpeg_parse, gint64 * rate)
         GST_SECOND * (mpeg_parse->last_scr_pos -
         mpeg_parse->first_scr_pos) / MPEGTIME_TO_GSTTIME (mpeg_parse->last_scr -
         mpeg_parse->first_scr);
-    if (*rate != 0) {
-      /*
-       * check if we need to update scr_rate
-       */
-      if ((mpeg_parse->scr_rate == 0) ||
-          (((double) (ABS (mpeg_parse->scr_rate -
-                          *rate)) / mpeg_parse->scr_rate)
-              >= MP_SCR_RATE_HYST)) {
-        mpeg_parse->scr_rate = *rate;
-        return TRUE;
-      }
-    }
-    if (mpeg_parse->scr_rate != 0) {
-      *rate = mpeg_parse->scr_rate;
+  }
+
+  if (*rate == 0 && mpeg_parse->avg_bitrate_time != 0
+      && mpeg_parse->avg_bitrate_bytes > MP_MIN_VALID_BSS) {
+    *rate =
+        GST_SECOND * mpeg_parse->avg_bitrate_bytes /
+        mpeg_parse->avg_bitrate_time;
+  }
+
+  if (*rate != 0) {
+    /*
+     * check if we need to update scr_rate
+     */
+    if ((mpeg_parse->scr_rate == 0) ||
+        (((double) (ABS (mpeg_parse->scr_rate - *rate)) / mpeg_parse->scr_rate)
+            >= MP_SCR_RATE_HYST)) {
+      mpeg_parse->scr_rate = *rate;
       return TRUE;
     }
   }
 
-  if (mpeg_parse->avg_bitrate_time != 0 && mpeg_parse->avg_bitrate_bytes != 0) {
-    *rate =
-        GST_SECOND * mpeg_parse->avg_bitrate_bytes /
-        mpeg_parse->avg_bitrate_time;
-    if (*rate != 0) {
-      return TRUE;
-    }
+  if (mpeg_parse->scr_rate != 0) {
+    *rate = mpeg_parse->scr_rate;
+    return TRUE;
   }
 
   if (mpeg_parse->mux_rate != 0) {
