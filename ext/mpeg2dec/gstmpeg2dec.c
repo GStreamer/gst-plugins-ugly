@@ -71,8 +71,8 @@ enum
 
 enum
 {
-  ARG_0
-      /* FILL ME */
+  ARG_0,
+  ARG_SKIP_FRAME
 };
 
 /*
@@ -228,6 +228,28 @@ gst_mpeg2dec_base_init (gpointer g_class)
   gst_element_class_set_details (element_class, &gst_mpeg2dec_details);
 }
 
+#define GST_MPEG2DEC_TYPE_SKIPFRAME (gst_mpeg2dec_skipframe_get_type())
+static GType
+gst_mpeg2dec_skipframe_get_type (void)
+{
+  static GType mpeg2dec_skipframe_type = 0;
+
+  if (!mpeg2dec_skipframe_type) {
+    static GEnumValue mpeg2dec_skipframe[] = {
+      {0, "0", "Skip nothing"},
+      {1, "1", "Skip B-frames"},
+      {2, "2", "Skip B-/P-frames"},
+      {3, "3", "Skip everything"},
+      {0, NULL, NULL},
+    };
+
+    mpeg2dec_skipframe_type =
+        g_enum_register_static ("GstMpeg2decSkipFrame", mpeg2dec_skipframe);
+  }
+
+  return mpeg2dec_skipframe_type;
+}
+
 static void
 gst_mpeg2dec_class_init (GstMpeg2decClass * klass)
 {
@@ -242,6 +264,11 @@ gst_mpeg2dec_class_init (GstMpeg2decClass * klass)
   gobject_class->set_property = gst_mpeg2dec_set_property;
   gobject_class->get_property = gst_mpeg2dec_get_property;
   gobject_class->dispose = gst_mpeg2dec_dispose;
+
+  g_object_class_install_property (gobject_class, ARG_SKIP_FRAME,
+      g_param_spec_enum ("skip-frame", "Skip frames",
+          "Which types of frames to skip during decoding",
+          GST_MPEG2DEC_TYPE_SKIPFRAME, 0, G_PARAM_READWRITE));
 
   gstelement_class->change_state = gst_mpeg2dec_change_state;
   gstelement_class->set_index = gst_mpeg2dec_set_index;
@@ -293,6 +320,8 @@ gst_mpeg2dec_init (GstMpeg2dec * mpeg2dec)
   mpeg2dec->closed = TRUE;
   mpeg2dec->have_fbuf = FALSE;
   mpeg2dec->offset = 0;
+
+  mpeg2dec->skip_frame = 0;
 
   for (i = 0; i < GST_MPEG2DEC_NUM_BUFS; i++)
     mpeg2dec->buffers[i] = NULL;
@@ -664,11 +693,13 @@ handle_picture (GstMpeg2dec * mpeg2dec, const mpeg2_info_t * info)
 {
   gboolean key_frame = FALSE;
   GstBuffer *outbuf;
+  gint pic_type = 0;
 
   if (info->current_picture) {
     key_frame =
         (info->current_picture->flags & PIC_MASK_CODING_TYPE) ==
         PIC_FLAG_CODING_TYPE_I;
+    pic_type = info->current_picture->flags & PIC_MASK_CODING_TYPE;
   }
   outbuf = gst_mpeg2dec_alloc_buffer (mpeg2dec, mpeg2dec->offset);
   if (!outbuf)
@@ -682,7 +713,10 @@ handle_picture (GstMpeg2dec * mpeg2dec, const mpeg2_info_t * info)
   if (mpeg2dec->discont_state == MPEG2DEC_DISC_NEW_PICTURE && key_frame)
     mpeg2dec->discont_state = MPEG2DEC_DISC_NEW_KEYFRAME;
 
-  if (!GST_PAD_IS_USABLE (mpeg2dec->srcpad))
+  if (!GST_PAD_IS_USABLE (mpeg2dec->srcpad) ||
+      mpeg2dec->skip_frame == 3 ||
+      (mpeg2dec->skip_frame == 2 && pic_type != PIC_FLAG_CODING_TYPE_I) ||
+      (mpeg2dec->skip_frame == 1 && pic_type == PIC_FLAG_CODING_TYPE_B))
     mpeg2_skip (mpeg2dec->decoder, 1);
   else
     mpeg2_skip (mpeg2dec->decoder, 0);
@@ -1541,6 +1575,9 @@ gst_mpeg2dec_set_property (GObject * object, guint prop_id,
   src = GST_MPEG2DEC (object);
 
   switch (prop_id) {
+    case ARG_SKIP_FRAME:
+      src->skip_frame = g_value_get_enum (value);
+      break;
     default:
       break;
   }
@@ -1557,6 +1594,9 @@ gst_mpeg2dec_get_property (GObject * object, guint prop_id, GValue * value,
   mpeg2dec = GST_MPEG2DEC (object);
 
   switch (prop_id) {
+    case ARG_SKIP_FRAME:
+      g_value_set_enum (value, mpeg2dec->skip_frame);
+      break;
     default:
       break;
   }

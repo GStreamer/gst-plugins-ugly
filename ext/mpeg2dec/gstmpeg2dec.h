@@ -102,6 +102,9 @@ struct _GstMpeg2dec {
 
   GstIndex	*index;
   gint		 index_id;
+
+  /* properties */
+  gint		 skip_frame;
 };
 
 struct _GstMpeg2decClass {
