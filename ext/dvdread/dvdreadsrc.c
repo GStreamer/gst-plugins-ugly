@@ -379,14 +379,17 @@ dvdreadsrc_get_formats (GstPad * pad)
 {
   static GstFormat formats[] = {
     GST_FORMAT_BYTES,
+    GST_FORMAT_TIME,
     0, 0, 0, 0,                 /* init later */
     0,
   };
-  if (formats[1] == 0) {
-    formats[1] = sector_format;
-    formats[2] = angle_format;
-    formats[3] = title_format;
-    formats[4] = chapter_format;
+  const gint start = 2;
+
+  if (formats[start] == 0) {
+    formats[start] = sector_format;
+    formats[start + 1] = angle_format;
+    formats[start + 2] = title_format;
+    formats[start + 3] = chapter_format;
   }
 
   return formats;
@@ -484,6 +487,32 @@ dvdreadsrc_srcpad_event (GstPad * pad, GstEvent * event)
   return res;
 }
 
+static GstClockTime
+dvdreadsrc_convert_timecode (dvd_time_t * time)
+{
+  GstClockTime ret_time;
+  const GstClockTime one_hour = 3600 * GST_SECOND;
+  const GstClockTime one_min = 60 * GST_SECOND;
+
+  g_return_val_if_fail ((time->hour >> 4) < 0xa
+      && (time->hour & 0xf) < 0xa, GST_CLOCK_TIME_NONE);
+  g_return_val_if_fail ((time->minute >> 4) < 0x7
+      && (time->minute & 0xf) < 0xa, GST_CLOCK_TIME_NONE);
+  g_return_val_if_fail ((time->second >> 4) < 0x7
+      && (time->second & 0xf) < 0xa, GST_CLOCK_TIME_NONE);
+
+  ret_time =
+      (GstClockTime) ((time->hour >> 4) * 10 + (time->hour & 0xf)) * one_hour;
+  ret_time +=
+      (GstClockTime) ((time->minute >> 4) * 10 +
+      (time->minute & 0xf)) * one_min;
+  ret_time +=
+      (GstClockTime) ((time->second >> 4) * 10 +
+      (time->second & 0xf)) * GST_SECOND;
+
+  return ret_time;
+}
+
 static gboolean
 dvdreadsrc_srcpad_query (GstPad * pad, GstQueryType type,
     GstFormat * format, gint64 * value)
@@ -498,8 +527,18 @@ dvdreadsrc_srcpad_query (GstPad * pad, GstQueryType type,
   switch (type) {
     case GST_QUERY_TOTAL:
       switch (*format) {
+        case GST_FORMAT_TIME:
+          if (priv->cur_pgc != NULL) {
+            *value =
+                dvdreadsrc_convert_timecode (&priv->cur_pgc->playback_time);
+            if (*value == GST_CLOCK_TIME_NONE)
+              res = FALSE;
+          } else
+            res = FALSE;
+          break;
         case GST_FORMAT_BYTES:
-          *value = DVDFileSize (priv->dvd_title) * DVD_VIDEO_LB_LEN;
+          *value =
+              (GstClockTime) (DVDFileSize (priv->dvd_title)) * DVD_VIDEO_LB_LEN;
           break;
         default:
           if (*format == sector_format) {
@@ -511,7 +550,7 @@ dvdreadsrc_srcpad_query (GstPad * pad, GstQueryType type,
           } else if (*format == angle_format) {
             *value = priv->tt_srpt->title[priv->title].nr_of_angles;
           } else {
-            GST_LOG ("Unknown format");
+            GST_LOG ("Query using unknown format %d", *format);
             res = FALSE;
           }
           break;
@@ -520,7 +559,7 @@ dvdreadsrc_srcpad_query (GstPad * pad, GstQueryType type,
     case GST_QUERY_POSITION:
       switch (*format) {
         case GST_FORMAT_BYTES:
-          *value = priv->cur_pack * DVD_VIDEO_LB_LEN;
+          *value = (gint64) (priv->cur_pack) * DVD_VIDEO_LB_LEN;
           break;
         default:
           if (*format == sector_format) {
@@ -532,7 +571,7 @@ dvdreadsrc_srcpad_query (GstPad * pad, GstQueryType type,
           } else if (*format == angle_format) {
             *value = priv->angle;
           } else {
-            GST_LOG ("Unknown format");
+            GST_LOG ("Query using unknown format %d", *format);
             res = FALSE;
           }
           break;
