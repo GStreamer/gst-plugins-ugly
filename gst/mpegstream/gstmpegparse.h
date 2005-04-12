@@ -80,6 +80,8 @@ G_BEGIN_DECLS
     guint64 next_scr;           /* Expected next SCR. */
     guint64 bytes_since_scr;    /* Bytes since current_scr */
 
+    GstClockTime current_ts;    /* Current TS corresponding to SCR */
+
     gboolean do_adjust;         /* If false, send discont events on SCR
                                  * jumps
                                  */
@@ -116,6 +118,7 @@ G_BEGIN_DECLS
     /* optional method to send out the data */
     void (*send_data) (GstMPEGParse * parse, GstData * data, GstClockTime time);
     void (*send_discont) (GstMPEGParse * parse, GstClockTime time);
+    void (*send_event) (GstMPEGParse * parse, GstEvent *event, GstClockTime time);
   };
 
   GType gst_mpeg_parse_get_type (void);

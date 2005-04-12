@@ -94,6 +94,7 @@ static void gst_mpeg_parse_set_clock (GstElement * element, GstClock * clock);
 static gboolean gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse,
     GstBuffer * buffer);
 
+static void gst_mpeg_parse_reset (GstMPEGParse * mpeg_parse);
 static void gst_mpeg_parse_handle_discont (GstMPEGParse * mpeg_parse,
     GstEvent * event);
 static void gst_mpeg_parse_reset (GstMPEGParse * mpeg_parse);
@@ -102,6 +103,8 @@ static void gst_mpeg_parse_send_data (GstMPEGParse * mpeg_parse, GstData * data,
     GstClockTime time);
 static void gst_mpeg_parse_send_discont (GstMPEGParse * mpeg_parse,
     GstClockTime time);
+static void gst_mpeg_parse_send_event (GstMPEGParse * mpeg_parse,
+    GstEvent * event, GstClockTime time);
 
 static void gst_mpeg_parse_new_pad (GstElement * element, GstPad * pad);
 
@@ -197,6 +200,7 @@ gst_mpeg_parse_class_init (GstMPEGParseClass * klass)
   klass->handle_discont = gst_mpeg_parse_handle_discont;
   klass->send_data = gst_mpeg_parse_send_data;
   klass->send_discont = gst_mpeg_parse_send_discont;
+  klass->send_event = gst_mpeg_parse_send_event;
 
   /* FIXME: this is a hack.  We add the pad templates here instead
    * in the base_init function, since the derived class (mpegdemux)
@@ -292,6 +296,7 @@ static void
 gst_mpeg_parse_reset (GstMPEGParse * mpeg_parse)
 {
   mpeg_parse->current_scr = 0;
+  mpeg_parse->current_ts = 0;
   mpeg_parse->bytes_since_scr = 0;
   mpeg_parse->avg_bitrate_time = 0;
   mpeg_parse->avg_bitrate_bytes = 0;
@@ -329,6 +334,7 @@ gst_mpeg_parse_handle_discont (GstMPEGParse * mpeg_parse, GstEvent * event)
       CLASS (mpeg_parse)->send_discont (mpeg_parse, time);
   } else {
     /* Use the next SCR to send a discontinuous event. */
+    GST_DEBUG_OBJECT (mpeg_parse, "Using next SCR to send discont");
     mpeg_parse->discont_pending = TRUE;
     mpeg_parse->scr_pending = TRUE;
   }
@@ -381,10 +387,26 @@ gst_mpeg_parse_send_discont (GstMPEGParse * mpeg_parse, GstClockTime time)
 {
   GstEvent *event;
 
-  if (GST_PAD_IS_USABLE (mpeg_parse->srcpad)) {
-    event = gst_event_new_discontinuous (FALSE, GST_FORMAT_TIME, time, NULL);
-    gst_pad_push (mpeg_parse->srcpad, GST_DATA (event));
+  event = gst_event_new_discontinuous (FALSE, GST_FORMAT_TIME, time, NULL);
+
+  if (!event) {
+    GST_ELEMENT_ERROR (GST_ELEMENT (mpeg_parse),
+        RESOURCE, FAILED, (NULL), ("Allocation failed"));
+    return;
   }
+
+  if (CLASS (mpeg_parse)->send_event)
+    CLASS (mpeg_parse)->send_event (mpeg_parse, event, time);
+}
+
+static void
+gst_mpeg_parse_send_event (GstMPEGParse * mpeg_parse, GstEvent * event,
+    GstClockTime time)
+{
+  if (GST_PAD_IS_USABLE (mpeg_parse->srcpad))
+    gst_pad_push (mpeg_parse->srcpad, GST_DATA (event));
+  else
+    gst_event_unref (event);
 }
 
 static void
@@ -463,6 +485,8 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
 
   prev_scr = mpeg_parse->current_scr;
   mpeg_parse->current_scr = scr;
+  mpeg_parse->current_ts = MPEGTIME_TO_GSTTIME (mpeg_parse->current_scr +
+      mpeg_parse->adjust);
   mpeg_parse->scr_pending = FALSE;
 
   if (mpeg_parse->next_scr == MP_INVALID_SCR) {
@@ -881,7 +905,6 @@ gst_mpeg_parse_handle_src_query (GstPad * pad, GstQueryType type,
             res = TRUE;
             break;
           }
-
           /* Otherwise fallthrough */
         default:
           src_format = GST_FORMAT_BYTES;
@@ -1020,6 +1043,7 @@ gst_mpeg_parse_handle_src_event (GstPad * pad, GstEvent * event)
         mpeg_parse->scr_pending = TRUE;
         mpeg_parse->next_scr = expected_scr;
         mpeg_parse->current_scr = MP_INVALID_SCR;
+        mpeg_parse->current_ts = GST_CLOCK_TIME_NONE;
         mpeg_parse->adjust = 0;
         res = TRUE;
       }

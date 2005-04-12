@@ -590,7 +590,7 @@ static gboolean
 gst_mpeg2dec_negotiate_format (GstMpeg2dec * mpeg2dec)
 {
   GstCaps *caps;
-  guint32 fourcc, myFourcc;
+  guint32 myFourcc;
   gboolean ret;
   const mpeg2_info_t *info;
   const mpeg2_sequence_t *sequence;
@@ -623,16 +623,14 @@ gst_mpeg2dec_negotiate_format (GstMpeg2dec * mpeg2dec)
       "framerate", G_TYPE_DOUBLE, mpeg2dec->frame_rate, NULL);
 
   ret = gst_pad_set_explicit_caps (mpeg2dec->srcpad, caps);
+  gst_caps_free (caps);
+
   if (!ret)
     return FALSE;
 
-  /* it worked, try to find what it was again */
-  gst_structure_get_fourcc (gst_caps_get_structure (caps, 0),
-      "format", &fourcc);
-
-  if (fourcc == GST_STR_FOURCC ("Y42B")) {
+  if (myFourcc == GST_STR_FOURCC ("Y42B")) {
     mpeg2dec->format = MPEG2DEC_FORMAT_I422;
-  } else if (fourcc == GST_STR_FOURCC ("I420")) {
+  } else if (myFourcc == GST_STR_FOURCC ("I420")) {
     mpeg2dec->format = MPEG2DEC_FORMAT_I420;
   } else {
     mpeg2dec->format = MPEG2DEC_FORMAT_YV12;
@@ -843,6 +841,11 @@ handle_slice (GstMpeg2dec * mpeg2dec, const mpeg2_info_t * info)
       } else {
         GST_BUFFER_FLAG_UNSET (outbuf, GST_BUFFER_KEY_UNIT);
       }
+      GST_DEBUG_OBJECT (mpeg2dec, "pushing video buffer, timestamp %"
+          GST_TIME_FORMAT ", duration %" GST_TIME_FORMAT,
+          gst_element_get_name (mpeg2dec),
+          GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf)),
+          GST_TIME_ARGS (GST_BUFFER_DURATION (outbuf)));
       gst_pad_push (mpeg2dec->srcpad, GST_DATA (outbuf));
     }
   } else if (info->display_fbuf && !info->display_fbuf->id) {
@@ -1006,6 +1009,30 @@ gst_mpeg2dec_chain (GstPad * pad, GstData * _data)
       {
         mpeg2dec->discont_state = MPEG2DEC_DISC_NEW_PICTURE;
         gst_mpeg2dec_flush_decoder (mpeg2dec);
+        gst_pad_event_default (pad, event);
+        return;
+      }
+      case GST_EVENT_FILLER:{
+        /* Transform filler to always have timestamp + duration */
+        GstClockTime end_ts = GST_EVENT_TIMESTAMP (event);
+        GstClockTime dur = gst_event_filler_get_duration (event);
+
+        if (!GST_CLOCK_TIME_IS_VALID (end_ts))
+          end_ts = mpeg2dec->next_time;
+
+        if (GST_CLOCK_TIME_IS_VALID (dur))
+          end_ts += dur;
+
+        dur = GST_CLOCK_DIFF (end_ts, mpeg2dec->next_time);
+
+        gst_event_unref (event);
+
+        if (dur <= 0)
+          return;
+
+        event = gst_event_new_filler_stamped (mpeg2dec->next_time, dur);
+        mpeg2dec->next_time = end_ts;
+
         gst_pad_event_default (pad, event);
         return;
       }

@@ -98,7 +98,7 @@ typedef enum
 DVDNavSrcPauseMode;
 
 /* Interval of time to sleep during pauses. */
-#define DVDNAVSRC_PAUSE_INTERVAL (GST_SECOND / 20)
+#define DVDNAVSRC_PAUSE_INTERVAL (GST_SECOND / 10)
 
 /* The DVD domain types. */
 typedef enum
@@ -124,7 +124,6 @@ struct _DVDNavSrc
 
   gboolean did_seek;
   gboolean need_flush;
-  gboolean need_newmedia;
 
   /* Timing */
   GstClock *clock;              /* The clock for this element. */
@@ -154,6 +153,12 @@ struct _DVDNavSrc
 
   GstBuffer *cur_buf;           /* Current output buffer. See
                                    dvdnavsrc_get. */
+
+  GstClockTime pgc_length;      /* Length of the current 
+                                   program chain (title) */
+  GstClockTime cell_start;      /* Start of the current cell */
+  GstClockTime pg_start;        /* Start of the current program
+                                 * within the PGC */
 };
 
 struct _DVDNavSrcClass
@@ -395,7 +400,6 @@ dvdnavsrc_init (DVDNavSrc * src)
 
   src->did_seek = FALSE;
   src->need_flush = FALSE;
-  src->need_newmedia = TRUE;
 
   /* Pause mode is initially inactive. */
   src->pause_mode = DVDNAVSRC_PAUSE_OFF;
@@ -419,6 +423,10 @@ dvdnavsrc_init (DVDNavSrc * src)
 
   /* No current output buffer. */
   src->cur_buf = NULL;
+
+  src->pgc_length = GST_CLOCK_TIME_NONE;
+  src->cell_start = 0;
+  src->pg_start = 0;
 }
 
 static void
@@ -1127,11 +1135,6 @@ dvdnavsrc_print_event (DVDNavSrc * src, guint8 * data, int event, int len)
     }
       break;
     case DVDNAV_CELL_CHANGE:
-    {
-      /*dvdnav_cell_change_event_t *event =
-         (dvdnav_cell_change_event_t *)data; */
-      /* FIXME: Print something relevant here. */
-    }
       break;
     case DVDNAV_NAV_PACKET:
     {
@@ -1200,25 +1203,32 @@ dvdnavsrc_make_dvd_event (DVDNavSrc * src, const gchar * event_name,
   return event;
 }
 
+static void
+dvdnavsrc_structure_set_uint64 (GstStructure * structure, const char *name,
+    guint64 val)
+{
+  GValue gvalue = { 0 };
+  g_value_init (&gvalue, G_TYPE_UINT64);
+  g_value_set_uint64 (&gvalue, val);
+  gst_structure_set_value (structure, name, &gvalue);
+}
+
 static GstEvent *
 dvdnavsrc_make_dvd_nav_packet_event (DVDNavSrc * src, const pci_t * pci)
 {
   GstEvent *event;
   GstStructure *structure;
-  GValue start_ptm = { 0 }, end_ptm = {
-  0};
 
-  /* Store the time values in GValues. */
-  g_value_init (&start_ptm, G_TYPE_UINT64);
-  g_value_set_uint64 (&start_ptm, MPEGTIME_TO_GSTTIME (pci->pci_gi.vobu_s_ptm));
-  g_value_init (&end_ptm, G_TYPE_UINT64);
-  g_value_set_uint64 (&end_ptm, MPEGTIME_TO_GSTTIME (pci->pci_gi.vobu_e_ptm));
-
-  /* Add the values to a new structure. */
+  /* Build the event structure. */
   structure = gst_structure_new ("application/x-gst-dvd",
       "event", G_TYPE_STRING, "dvd-nav-packet", NULL);
-  gst_structure_set_value (structure, "start_ptm", &start_ptm);
-  gst_structure_set_value (structure, "end_ptm", &end_ptm);
+
+  dvdnavsrc_structure_set_uint64 (structure, "start_ptm",
+      MPEGTIME_TO_GSTTIME (pci->pci_gi.vobu_s_ptm));
+  dvdnavsrc_structure_set_uint64 (structure, "end_ptm",
+      MPEGTIME_TO_GSTTIME (pci->pci_gi.vobu_e_ptm));
+  dvdnavsrc_structure_set_uint64 (structure, "cell_start", src->cell_start);
+  dvdnavsrc_structure_set_uint64 (structure, "pg_start", src->pg_start);
 
   /* Create the DVD event and put the structure into it. */
   event = gst_event_new (GST_EVENT_ANY);
@@ -1279,30 +1289,36 @@ dvdnavsrc_loop (GstElement * element)
 
   g_return_if_fail (dvdnavsrc_is_open (src));
 
-  if (src->did_seek || src->need_newmedia) {
-    GstEvent *event;
-
-    src->did_seek = FALSE;
-    GST_INFO_OBJECT (src, "sending discont");
-
-    event = gst_event_new_discontinuous (src->need_newmedia, 0);
-
-    src->need_flush = FALSE;
-    src->need_newmedia = FALSE;
-    gst_pad_push (src->srcpad, GST_DATA (event));
-    return;
-  }
-
-  if (src->need_flush) {
-    src->need_flush = FALSE;
-    GST_INFO_OBJECT (src, "sending flush");
-    gst_pad_push (src->srcpad, GST_DATA (gst_event_new_flush ()));
-    return;
-  }
-
   /* Loop processing blocks until there is data to send. */
   send_data = NULL;
   while (send_data == NULL) {
+    if (src->pause_mode == DVDNAVSRC_PAUSE_OFF) {
+      if (src->did_seek) {
+        GstEvent *event;
+
+        src->did_seek = FALSE;
+        GST_INFO_OBJECT (src, "sending discont");
+
+        event = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
+
+        src->need_flush = FALSE;
+        gst_pad_push (src->srcpad, GST_DATA (event));
+        return;
+      }
+    }
+
+    if (src->need_flush) {
+      if (src->pause_mode != DVDNAVSRC_PAUSE_OFF) {
+        DVDNAV_CALL (dvdnav_still_skip, (src->dvdnav), src);
+        src->pause_mode = DVDNAVSRC_PAUSE_OFF;
+      }
+
+      src->need_flush = FALSE;
+      GST_INFO_OBJECT (src, "sending flush");
+      gst_pad_push (src->srcpad, GST_DATA (gst_event_new_flush ()));
+      return;
+    }
+
     if (src->cur_buf == NULL) {
       src->cur_buf = gst_buffer_new_and_alloc (DVD_VIDEO_LB_LEN);
       if (src->cur_buf == NULL) {
@@ -1360,35 +1376,56 @@ dvdnavsrc_loop (GstElement * element)
 
           /* We are in pause mode. Make this element sleep for a
              fraction of a second. */
-          if (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end) {
+          if ((src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) &&
+              (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end)) {
             gst_element_wait (GST_ELEMENT (src), src->pause_end);
           } else {
             gst_element_wait (GST_ELEMENT (src),
                 current_time + DVDNAVSRC_PAUSE_INTERVAL);
+            src->did_seek = TRUE;
           }
-          /* Send an empty event to keep the pipeline going. */
-          /* FIXME: Use an interrupt/filler event here. */
-          event = gst_event_new (GST_EVENT_EMPTY);
-          send_data = GST_DATA (event);
-          GST_EVENT_TIMESTAMP (event) =
-              gst_element_get_time (GST_ELEMENT (src));
 
+          /* Send an empty event to keep the pipeline going. */
+          event = gst_event_new_filler_stamped (GST_CLOCK_TIME_NONE,
+              DVDNAVSRC_PAUSE_INTERVAL);
+          GST_DEBUG_OBJECT (src,
+              "Pause mode %d, Sending filler at %llu, dur %lld\n",
+              src->pause_mode, gst_element_get_time (GST_ELEMENT (src)),
+              DVDNAVSRC_PAUSE_INTERVAL);
+
+          send_data = GST_DATA (event);
           break;
         } else {
           /* We reached the end of the pause. */
           src->pause_mode = DVDNAVSRC_PAUSE_OFF;
           DVDNAV_CALL (dvdnav_still_skip, (src->dvdnav), src);
+
+          /* Schedule a discont to reset the time */
+          src->did_seek = TRUE;
         }
       }
         break;
 
       case DVDNAV_WAIT:
+      {
+#if 0
+        GstEvent *event;
+#endif
         /* FIXME: We should really wait here until the fifos are
            empty, but I have no idea how to do that.  In the mean time,
            just clean the wait state. */
         GST_INFO_OBJECT (src, "sending wait");
+
+        gst_element_wait (GST_ELEMENT (src),
+            gst_element_get_time (GST_ELEMENT (src)) + 1.5 * GST_SECOND);
         DVDNAV_CALL (dvdnav_wait_skip, (src->dvdnav), src);
+
+#if 0
+        event = gst_event_new_filler ();
+        send_data = GST_DATA (event);
+#endif
         break;
+      }
 
       case DVDNAV_STOP:
         GST_INFO_OBJECT (src, "sending eos");
@@ -1399,6 +1436,18 @@ dvdnavsrc_loop (GstElement * element)
         break;
 
       case DVDNAV_CELL_CHANGE:
+      {
+        dvdnav_cell_change_event_t *event = (dvdnav_cell_change_event_t *) data;
+
+        src->pgc_length = MPEGTIME_TO_GSTTIME (event->pgc_length);
+        src->cell_start = MPEGTIME_TO_GSTTIME (event->cell_start);
+        src->pg_start = MPEGTIME_TO_GSTTIME (event->pg_start);
+
+        GST_LOG_OBJECT (src, "New cell. PGC Len %" GST_TIME_FORMAT
+            " cell_start %" GST_TIME_FORMAT ", pg_start %" GST_TIME_FORMAT,
+            GST_TIME_ARGS (src->pgc_length),
+            GST_TIME_ARGS (src->cell_start), GST_TIME_ARGS (src->pg_start));
+      }
         dvdnavsrc_update_streaminfo (src);
         break;
 
@@ -1434,6 +1483,7 @@ dvdnavsrc_loop (GstElement * element)
         send_data = GST_DATA (dvdnavsrc_make_dvd_event (src,
                 "dvd-vts-change", "domain",
                 G_TYPE_INT, (gint) src->domain, NULL));
+        src->did_seek = TRUE;
       }
         break;
 
@@ -1506,6 +1556,7 @@ dvdnavsrc_loop (GstElement * element)
 
         src->button = 0;
         src->pause_mode = DVDNAVSRC_PAUSE_OFF;
+        // src->did_seek = TRUE;
         send_data = GST_DATA (gst_event_new_flush ());
         break;
 
@@ -1603,7 +1654,7 @@ dvdnavsrc_change_state (GstElement * element)
         }
       }
       src->streaminfo = NULL;
-      src->need_newmedia = TRUE;
+      src->did_seek = TRUE;
       break;
     case GST_STATE_PAUSED_TO_PLAYING:
       break;
@@ -1650,9 +1701,51 @@ dvdnav_handle_navigation_event (DVDNavSrc * src, GstEvent * event)
   g_return_val_if_fail (event != NULL, FALSE);
 
   if (strcmp (event_type, "key-press") == 0) {
-    const char *key = gst_structure_get_string (structure, "key");
+    const gchar *key = gst_structure_get_string (structure, "key");
 
-    g_assert (key != NULL);
+    if (key == NULL)
+      return TRUE;
+
+    if (g_str_equal (key, "Return")) {
+      dvdnav_button_activate (src->dvdnav,
+          dvdnav_get_current_nav_pci (src->dvdnav));
+    } else if (g_str_equal (key, "Left")) {
+      dvdnav_left_button_select (src->dvdnav,
+          dvdnav_get_current_nav_pci (src->dvdnav));
+    } else if (g_str_equal (key, "Right")) {
+      dvdnav_right_button_select (src->dvdnav,
+          dvdnav_get_current_nav_pci (src->dvdnav));
+    } else if (g_str_equal (key, "Up")) {
+      dvdnav_upper_button_select (src->dvdnav,
+          dvdnav_get_current_nav_pci (src->dvdnav));
+    } else if (g_str_equal (key, "Down")) {
+      dvdnav_lower_button_select (src->dvdnav,
+          dvdnav_get_current_nav_pci (src->dvdnav));
+    } else if (g_str_equal (key, "m")) {
+      dvdnav_menu_call (src->dvdnav, DVD_MENU_Escape);
+    } else if (g_str_equal (key, "t")) {
+      dvdnav_menu_call (src->dvdnav, DVD_MENU_Title);
+    } else if (g_str_equal (key, "r")) {
+      dvdnav_menu_call (src->dvdnav, DVD_MENU_Root);
+    } else if (g_str_equal (key, "comma")) {
+      int title = 0;
+      int part = 0;
+
+      if (dvdnav_current_title_info (src->dvdnav, &title, &part) && title > 0
+          && part > 1) {
+        dvdnav_part_play (src->dvdnav, title, part - 1);
+        src->did_seek = TRUE;
+      }
+    } else if (g_str_equal (key, "period")) {
+      int title = 0;
+      int part = 0;
+
+      if (dvdnav_current_title_info (src->dvdnav, &title, &part) && title > 0) {
+        dvdnav_part_play (src->dvdnav, title, part + 1);
+        src->did_seek = TRUE;
+      }
+    }
+
     GST_DEBUG ("dvdnavsrc got a keypress: %s", key);
   } else if (strcmp (event_type, "mouse-move") == 0) {
     double x, y;
@@ -1669,6 +1762,7 @@ dvdnav_handle_navigation_event (DVDNavSrc * src, GstEvent * event)
 
     gst_structure_get_double (structure, "pointer_x", &x);
     gst_structure_get_double (structure, "pointer_y", &y);
+    GST_DEBUG_OBJECT (src, "Got click at %g, %g", x, y);
 
     dvdnav_mouse_activate (src->dvdnav,
         dvdnav_get_current_nav_pci (src->dvdnav), (int) x, (int) y);
@@ -1700,6 +1794,8 @@ dvdnavsrc_event (GstPad * pad, GstEvent * event)
 
       format = GST_EVENT_SEEK_FORMAT (event);
       offset = GST_EVENT_SEEK_OFFSET (event);
+      GST_DEBUG_OBJECT (src, "Seeking to %lld, format %d, method %d\n", offset,
+          format, GST_EVENT_SEEK_METHOD (event));
 
       switch (format) {
         case GST_FORMAT_BYTES:
@@ -1846,8 +1942,8 @@ dvdnavsrc_get_formats (GstPad * pad)
   int i;
   static GstFormat formats[] = {
     GST_FORMAT_BYTES,
+    GST_FORMAT_TIME,
     /*
-       GST_FORMAT_TIME,
        GST_FORMAT_DEFAULT,
      */
     0,                          /* filled later */
@@ -1929,7 +2025,12 @@ dvdnavsrc_query (GstPad * pad, GstQueryType type,
 
   switch (type) {
     case GST_QUERY_TOTAL:
-      if (*format == sector_format) {
+      if (*format == GST_FORMAT_TIME) {
+        if (src->pgc_length != GST_CLOCK_TIME_NONE) {
+          *value = src->pgc_length;
+        } else
+          res = FALSE;
+      } else if (*format == sector_format) {
         if (dvdnav_get_position (src->dvdnav, &pos, &len)
             != DVDNAV_STATUS_OK) {
           res = FALSE;
@@ -1969,6 +2070,11 @@ dvdnavsrc_query (GstPad * pad, GstQueryType type,
           res = FALSE;
         }
         *value = pos;
+      } else if (*format == GST_FORMAT_BYTES) {
+        if (dvdnav_get_position (src->dvdnav, &pos, &len) != DVDNAV_STATUS_OK) {
+          res = FALSE;
+        }
+        *value = pos * DVD_SECTOR_SIZE;
       } else if (*format == title_format) {
         if (dvdnav_current_title_info (src->dvdnav, &title, &part)
             != DVDNAV_STATUS_OK) {
