@@ -292,10 +292,13 @@ gst_mpeg_demux_send_discont (GstMPEGParse * mpeg_parse, GstClockTime time)
 
   if (!mpeg_demux->just_flushed) {
     GST_DEBUG_OBJECT (mpeg_parse, "Discont without flush, ts = %llu", time);
+    /* Add padding to the end to make sure all streams end at the same timestamp */
+    CLASS (mpeg_demux)->synchronise_pads (mpeg_demux,
+        mpeg_parse->current_ts + mpeg_demux->adjust + (GST_SECOND / 20),
+        mpeg_parse->current_ts + mpeg_demux->adjust + (GST_SECOND / 20));
   } else {
     GST_DEBUG_OBJECT (mpeg_parse, "Discont after flush, ts = %llu", time);
   }
-
   mpeg_demux->just_flushed = FALSE;
 
   parent_class->send_discont (mpeg_parse, time);
@@ -416,6 +419,7 @@ gst_mpeg_demux_init_stream (GstMPEGDemux * mpeg_demux,
   }
 
   str->cur_ts = 0;
+  str->scr_offs = 0;
 }
 
 static GstMPEGStream *
@@ -1000,6 +1004,10 @@ gst_mpeg_demux_send_subbuffer (GstMPEGDemux * mpeg_demux,
 
   if (timestamp != GST_CLOCK_TIME_NONE) {
     outstream->cur_ts = timestamp;
+    outstream->scr_offs =
+        GST_CLOCK_DIFF (timestamp, mpeg_parse->current_ts + mpeg_demux->adjust);
+    if (outstream->scr_offs < 0)
+      outstream->scr_offs = 0;
 
     if (mpeg_demux->index != NULL) {
       /* Register a new index position. */
@@ -1008,6 +1016,9 @@ gst_mpeg_demux_send_subbuffer (GstMPEGDemux * mpeg_demux,
           GST_FORMAT_BYTES,
           GST_BUFFER_OFFSET (buffer), GST_FORMAT_TIME, timestamp, 0);
     }
+  } else {
+    outstream->cur_ts =
+        mpeg_parse->current_ts + mpeg_demux->adjust + outstream->scr_offs;
   }
 
   if (!GST_PAD_IS_USABLE (outstream->pad) || (size == 0)) {
@@ -1031,7 +1042,8 @@ gst_mpeg_demux_send_subbuffer (GstMPEGDemux * mpeg_demux,
         mpeg_demux->max_gap);
 
     CLASS (mpeg_demux)->synchronise_pads (mpeg_demux, threshold,
-        threshold + mpeg_demux->max_gap_tolerance);
+        mpeg_parse->current_ts + mpeg_demux->adjust -
+        mpeg_demux->max_gap_tolerance);
   }
 }
 
@@ -1059,7 +1071,7 @@ gst_mpeg_demux_synchronise_pads (GstMPEGDemux * mpeg_demux,
 
   for (i = 0; i < GST_MPEG_DEMUX_NUM_VIDEO_STREAMS; i++)
     if (mpeg_demux->video_stream[i]
-        && (mpeg_demux->video_stream[i]->cur_ts < threshold)) {
+        && mpeg_demux->video_stream[i]->cur_ts < threshold) {
       CLASS (mpeg_demux)->sync_stream_to_time (mpeg_demux,
           mpeg_demux->video_stream[i], new_ts);
       mpeg_demux->video_stream[i]->cur_ts = new_ts;
@@ -1067,7 +1079,7 @@ gst_mpeg_demux_synchronise_pads (GstMPEGDemux * mpeg_demux,
 
   for (i = 0; i < GST_MPEG_DEMUX_NUM_AUDIO_STREAMS; i++)
     if (mpeg_demux->audio_stream[i]
-        && (mpeg_demux->audio_stream[i]->cur_ts < threshold)) {
+        && mpeg_demux->audio_stream[i]->cur_ts < threshold) {
       CLASS (mpeg_demux)->sync_stream_to_time (mpeg_demux,
           mpeg_demux->audio_stream[i], new_ts);
       mpeg_demux->audio_stream[i]->cur_ts = new_ts;
@@ -1075,7 +1087,7 @@ gst_mpeg_demux_synchronise_pads (GstMPEGDemux * mpeg_demux,
 
   for (i = 0; i < GST_MPEG_DEMUX_NUM_PRIVATE_STREAMS; i++)
     if (mpeg_demux->private_stream[i]
-        && (mpeg_demux->private_stream[i]->cur_ts < threshold)) {
+        && mpeg_demux->private_stream[i]->cur_ts < threshold) {
       CLASS (mpeg_demux)->sync_stream_to_time (mpeg_demux,
           mpeg_demux->private_stream[i], new_ts);
       mpeg_demux->private_stream[i]->cur_ts = new_ts;
@@ -1084,9 +1096,9 @@ gst_mpeg_demux_synchronise_pads (GstMPEGDemux * mpeg_demux,
 
 /* Send a filler event on the indicated pad to catch it up to
  * last_ts. Query the pad for current time, and use that time
- * to set the duration of the filler event, otherwise we don't
- * know the 'current time' of the stream, so send a filler
- * with no duration and the decoders will need to adjust it
+ * to set the duration of the filler event, otherwise we use
+ * the last timestamp of the stream and rely on the sinks
+ * to absorb any overlap with the decoded data.
  */
 static void
 gst_mpeg_demux_sync_stream_to_time (GstMPEGDemux * mpeg_demux,
@@ -1096,23 +1108,25 @@ gst_mpeg_demux_sync_stream_to_time (GstMPEGDemux * mpeg_demux,
   GstEvent *filler = NULL;
   GstFormat fmt = GST_FORMAT_TIME;
 
-  if (GST_PAD_PEER (stream->pad)
-      && gst_pad_query (GST_PAD_PEER (stream->pad), GST_QUERY_POSITION, &fmt,
+  if (!GST_PAD_PEER (stream->pad)
+      || !gst_pad_query (GST_PAD_PEER (stream->pad), GST_QUERY_POSITION, &fmt,
           &start_ts)) {
-    if (start_ts < last_ts)
-      filler =
-          gst_event_new_filler_stamped (start_ts, GST_CLOCK_DIFF (last_ts,
-              start_ts));
-  } else
-    filler = gst_event_new_filler_stamped (last_ts, GST_CLOCK_TIME_NONE);
+    start_ts = stream->cur_ts;
+  }
+
+  if (start_ts < last_ts) {
+    filler = gst_event_new_filler_stamped (start_ts, GST_CLOCK_DIFF (last_ts,
+            start_ts));
+  }
 
   if (filler) {
     if (GST_PAD_IS_USABLE (stream->pad)) {
-      gst_pad_push (stream->pad, GST_DATA (filler));
       GST_LOG ("Advancing %s from %llu by %lld to %llu (diff %lld)",
           gst_pad_get_name (stream->pad), stream->cur_ts,
           gst_event_filler_get_duration (filler), last_ts,
           GST_CLOCK_DIFF (last_ts, stream->cur_ts));
+
+      gst_pad_push (stream->pad, GST_DATA (filler));
     } else
       gst_event_unref (filler);
   }

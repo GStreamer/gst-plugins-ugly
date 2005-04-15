@@ -415,7 +415,7 @@ gst_dvd_demux_handle_dvd_event (GstDVDDemux * dvd_demux, GstEvent * event)
 
       /* Keep video/audio/subtitle pads within 1/2 sec of the SCR */
       mpeg_demux->max_gap = 0.5 * GST_SECOND;
-      mpeg_demux->max_gap_tolerance = 0.1 * GST_SECOND;
+      mpeg_demux->max_gap_tolerance = 0.05 * GST_SECOND;
     }
 
     /* Send a discont after a seek, or if PTM wrapping causes too large a gap */
@@ -500,8 +500,6 @@ gst_dvd_demux_handle_discont (GstMPEGParse * mpeg_parse, GstEvent * event)
   /* let parent handle and forward discont */
   if (GST_MPEG_PARSE_CLASS (parent_class)->handle_discont != NULL)
     GST_MPEG_PARSE_CLASS (parent_class)->handle_discont (mpeg_parse, event);
-
-  mpeg_parse->discont_pending = FALSE;
 }
 
 static GstMPEGStream *

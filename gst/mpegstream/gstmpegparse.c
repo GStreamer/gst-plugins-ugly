@@ -532,9 +532,6 @@ gst_mpeg_parse_parse_packhead (GstMPEGParse * mpeg_parse, GstBuffer * buffer)
         G_GINT64_FORMAT, mpeg_parse->next_scr, mpeg_parse->current_scr,
         mpeg_parse->current_scr + mpeg_parse->adjust, mpeg_parse->adjust);
 
-    mpeg_parse->first_scr = MP_INVALID_SCR;
-    mpeg_parse->last_scr = MP_INVALID_SCR;
-
     if (mpeg_parse->do_adjust) {
       if (mpeg_parse->use_adjust) {
         mpeg_parse->adjust +=

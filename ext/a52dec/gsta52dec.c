@@ -343,27 +343,6 @@ gst_a52dec_handle_event (GstA52Dec * a52dec, GstEvent * event)
         a52dec->cache = NULL;
       }
       break;
-    case GST_EVENT_FILLER:{
-      /* Transform filler to always have timestamp + duration */
-      GstClockTime end_ts = GST_EVENT_TIMESTAMP (event);
-      GstClockTime dur = gst_event_filler_get_duration (event);
-
-      if (!GST_CLOCK_TIME_IS_VALID (end_ts))
-        end_ts = a52dec->time;
-
-      if (GST_CLOCK_TIME_IS_VALID (dur))
-        end_ts += dur;
-
-      dur = GST_CLOCK_DIFF (end_ts, a52dec->time);
-
-      gst_event_unref (event);
-
-      if (dur <= 0)
-        return;
-
-      event = gst_event_new_filler_stamped (a52dec->time, dur);
-      a52dec->time = end_ts;
-    }
     default:
       break;
   }

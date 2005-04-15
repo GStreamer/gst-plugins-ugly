@@ -94,6 +94,7 @@ struct _GstMPEGStream {
   gint	 	index_id;
   gint		size_bound;
   GstClockTime  cur_ts;
+  GstClockTimeDiff scr_offs;
 };
 
 /* Extended structure to hold additional information for video
