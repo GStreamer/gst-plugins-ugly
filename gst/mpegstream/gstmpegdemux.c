@@ -271,12 +271,15 @@ gst_mpeg_demux_send_data (GstMPEGParse * mpeg_parse, GstData * data,
     GstEvent *event = GST_EVENT (data);
 
     switch (GST_EVENT_TYPE (event)) {
-      case GST_EVENT_EOS:
-        gst_element_set_eos (GST_ELEMENT (mpeg_parse));
-        /* Fallthrough */
-      default:
+      case GST_EVENT_FILLER:
+      case GST_EVENT_DISCONTINUOUS:
+      case GST_EVENT_FLUSH:
         PARSE_CLASS (mpeg_parse)->send_event (mpeg_parse, event,
             GST_CLOCK_TIME_NONE);
+        break;
+      default:
+        /* Propagate the event normally. */
+        gst_pad_event_default (mpeg_parse->sinkpad, event);
         break;
     }
   }

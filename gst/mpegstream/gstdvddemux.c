@@ -325,13 +325,15 @@ gst_dvd_demux_send_data (GstMPEGParse * mpeg_parse, GstData * data,
       case GST_EVENT_ANY:
         gst_dvd_demux_handle_dvd_event (dvd_demux, event);
         break;
-      case GST_EVENT_EOS:
-        gst_element_set_eos (GST_ELEMENT (mpeg_parse));
-        /* Fallthrough */
-      default:
-        /* Propagate the event normally. */
+      case GST_EVENT_FILLER:
+      case GST_EVENT_DISCONTINUOUS:
+      case GST_EVENT_FLUSH:
         PARSE_CLASS (dvd_demux)->send_event (mpeg_parse, event,
             GST_CLOCK_TIME_NONE);
+        break;
+      default:
+        /* Propagate the event normally. */
+        gst_pad_event_default (mpeg_parse->sinkpad, event);
         break;
     }
   }
