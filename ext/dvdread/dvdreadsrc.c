@@ -38,7 +38,6 @@
 #include <assert.h>
 
 #include "dvdreadsrc.h"
-#include "stream_labels.h"
 
 #include <dvdread/dvd_reader.h>
 #include <dvdread/ifo_types.h>
