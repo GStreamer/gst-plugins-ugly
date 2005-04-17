@@ -307,6 +307,8 @@ gst_dvd_demux_init (GstDVDDemux * dvd_demux)
   for (i = 0; i < GST_DVD_DEMUX_NUM_SUBPICTURE_STREAMS; i++) {
     dvd_demux->subpicture_stream[i] = NULL;
   }
+
+  dvd_demux->langcodes = NULL;
 }
 
 
@@ -442,6 +444,10 @@ gst_dvd_demux_handle_dvd_event (GstDVDDemux * dvd_demux, GstEvent * event)
     dvd_demux->last_end_ptm = end_ptm;
 
     gst_event_unref (event);
+  } else if (!strcmp (event_type, "dvd-lang-codes")) {
+    if (dvd_demux->langcodes)
+      gst_event_unref (dvd_demux->langcodes);
+    dvd_demux->langcodes = event;
   } else {
     GST_DEBUG_OBJECT (dvd_demux, "dvddemux Forwarding DVD event %s to all pads",
         event_type);
@@ -543,13 +549,14 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
   GstDVDLPCMStream *lpcm_str = NULL;
   gboolean add_pad = FALSE;
   GstCaps *caps;
-  const gchar *codec = NULL;
+  const gchar *codec = NULL, *lang_code = NULL;
 
   g_return_val_if_fail (stream_nr < GST_MPEG_DEMUX_NUM_AUDIO_STREAMS, NULL);
   g_return_val_if_fail (type > GST_MPEG_DEMUX_AUDIO_UNKNOWN &&
       type < GST_DVD_DEMUX_AUDIO_LAST, NULL);
 
   if (type < GST_MPEG_DEMUX_AUDIO_LAST) {
+    /* FIXME: language codes on MPEG audio streams */
     return parent_class->get_audio_stream (mpeg_demux, stream_nr, type, info);
   }
 
@@ -685,13 +692,29 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
     }
 
     if (add_pad) {
+      if (dvd_demux->langcodes) {
+        gchar *t;
+
+        t = g_strdup_printf ("audio-%d-language", stream_nr);
+        lang_code =
+            gst_structure_get_string (dvd_demux->langcodes->event_data.
+            structure.structure, t);
+        g_free (t);
+      }
+
       gst_element_add_pad (GST_ELEMENT (mpeg_demux), str->pad);
 
-      if (codec) {
+      if (codec || lang_code) {
         GstTagList *list = gst_tag_list_new ();
 
-        gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
-            GST_TAG_AUDIO_CODEC, codec, NULL);
+        if (codec) {
+          gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+              GST_TAG_AUDIO_CODEC, codec, NULL);
+        }
+        if (lang_code) {
+          gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+              GST_TAG_LANGUAGE_CODE, lang_code, NULL);
+        }
         gst_element_found_tags_for_pad (GST_ELEMENT (mpeg_demux),
             str->pad, 0, list);
       }
@@ -713,6 +736,7 @@ gst_dvd_demux_get_subpicture_stream (GstMPEGDemux * mpeg_demux,
   gchar *name;
   GstCaps *caps;
   gboolean add_pad = FALSE;
+  const gchar *lang_code = NULL;
 
   g_return_val_if_fail (stream_nr < GST_DVD_DEMUX_NUM_SUBPICTURE_STREAMS, NULL);
   g_return_val_if_fail (type > GST_DVD_DEMUX_SUBP_UNKNOWN &&
@@ -757,8 +781,28 @@ gst_dvd_demux_get_subpicture_stream (GstMPEGDemux * mpeg_demux,
     }
 
     gst_caps_free (caps);
-    if (add_pad)
+    if (add_pad) {
       gst_element_add_pad (GST_ELEMENT (mpeg_demux), str->pad);
+
+      if (dvd_demux->langcodes) {
+        gchar *t;
+
+        t = g_strdup_printf ("subtitle-%d-language", stream_nr);
+        lang_code =
+            gst_structure_get_string (dvd_demux->langcodes->event_data.
+            structure.structure, t);
+        g_free (t);
+
+        if (lang_code) {
+          GstTagList *list = gst_tag_list_new ();
+
+          gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+              GST_TAG_LANGUAGE_CODE, lang_code, NULL);
+          gst_element_found_tags_for_pad (GST_ELEMENT (mpeg_demux),
+              str->pad, 0, list);
+        }
+      }
+    }
     str->type = GST_DVD_DEMUX_SUBP_DVD;
   }
 
@@ -1150,6 +1194,10 @@ gst_dvd_demux_change_state (GstElement * element)
   switch (GST_STATE_TRANSITION (element)) {
     case GST_STATE_PAUSED_TO_READY:
       gst_dvd_demux_reset (dvd_demux);
+      if (dvd_demux->langcodes) {
+        gst_event_unref (dvd_demux->langcodes);
+        dvd_demux->langcodes = NULL;
+      }
       break;
     default:
       break;

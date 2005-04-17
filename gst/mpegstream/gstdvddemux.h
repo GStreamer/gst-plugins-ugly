@@ -111,6 +111,8 @@ struct _GstDVDDemux {
 
   GstMPEGStream *subpicture_stream[GST_DVD_DEMUX_NUM_SUBPICTURE_STREAMS];
 				/* Subpicture output streams. */
+
+  GstEvent *langcodes;
 };
 
 

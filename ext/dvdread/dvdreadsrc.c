@@ -55,7 +55,7 @@ struct _DVDReadSrcPrivate
   gchar *location;
   gchar *last_uri;
 
-  gboolean new_seek;
+  gboolean new_seek, change_cell;
 
   gboolean new_cell;
 
@@ -74,6 +74,7 @@ struct _DVDReadSrcPrivate
   /* where we are */
   gboolean seek_pend, flush_pend;
   GstFormat seek_pend_fmt;
+  GstEvent *title_lang_event_pending;
 };
 
 GST_DEBUG_CATEGORY_STATIC (gstdvdreadsrc_debug);
@@ -245,6 +246,7 @@ dvdreadsrc_init (DVDReadSrc * dvdreadsrc)
   dvdreadsrc->priv->last_uri = NULL;
   dvdreadsrc->priv->new_seek = TRUE;
   dvdreadsrc->priv->new_cell = TRUE;
+  dvdreadsrc->priv->change_cell = FALSE;
   dvdreadsrc->priv->title = 0;
   dvdreadsrc->priv->chapter = 0;
   dvdreadsrc->priv->angle = 0;
@@ -252,6 +254,7 @@ dvdreadsrc_init (DVDReadSrc * dvdreadsrc)
   dvdreadsrc->priv->seek_pend = FALSE;
   dvdreadsrc->priv->flush_pend = FALSE;
   dvdreadsrc->priv->seek_pend_fmt = GST_FORMAT_UNDEFINED;
+  dvdreadsrc->priv->title_lang_event_pending = NULL;
 }
 
 static void
@@ -647,7 +650,10 @@ _open (DVDReadSrcPrivate * priv, const gchar * location)
 static int
 _seek_title (DVDReadSrcPrivate * priv, int title, int angle)
 {
-  GHashTable *languagelist = NULL;
+  GstEvent *e;
+  GstStructure *s;
+  gint i;
+  gchar lang_code[3] = { '\0', '\0', '\0' }, *t;
 
     /**
      * Make sure our title number is valid.
@@ -709,17 +715,51 @@ _seek_title (DVDReadSrcPrivate * priv, int title, int angle)
     return -1;
   }
 
-  /* Get stream labels for all audio and subtitle streams */
-  languagelist = dvdreadsrc_init_languagelist ();
-
-  dvdreadsrc_get_audio_stream_labels (priv->vts_file, languagelist);
-  dvdreadsrc_get_subtitle_stream_labels (priv->vts_file, languagelist);
-
-  g_hash_table_destroy (languagelist);
-
   GST_LOG ("Opened title %d, angle %d", title, angle);
   priv->title = title;
   priv->angle = angle;
+
+  /* build event */
+  if (priv->title_lang_event_pending)
+    gst_event_unref (priv->title_lang_event_pending);
+  e = priv->title_lang_event_pending = gst_event_new (GST_EVENT_ANY);
+  s = e->event_data.structure.structure =
+      gst_structure_new ("application/x-gst-event",
+      "event", G_TYPE_STRING, "dvd-lang-codes", NULL);
+
+  /* audio */
+  for (i = 0; i < priv->vts_file->vtsi_mat->nr_of_vts_audio_streams; i++) {
+    const audio_attr_t *a = &priv->vts_file->vtsi_mat->vts_audio_attr[i];
+
+    t = g_strdup_printf ("audio-%d-format", i);
+    gst_structure_set (s, t, G_TYPE_INT, (int) a->audio_format, NULL);
+    g_free (t);
+
+    GST_DEBUG ("Audio stream %d is format %d", i, (int) a->audio_format);
+
+    if (a->lang_type) {
+      t = g_strdup_printf ("audio-%d-language", i);
+      lang_code[0] = (a->lang_code >> 8) & 0xff;
+      lang_code[1] = a->lang_code & 0xff;
+      gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
+      g_free (t);
+
+      GST_DEBUG ("Audio stream %d is language %s", i, lang_code);
+    }
+  }
+
+  /* subtitle */
+  for (i = 0; i < priv->vts_file->vtsi_mat->nr_of_vts_subp_streams; i++) {
+    const subp_attr_t *u = &priv->vts_file->vtsi_mat->vts_subp_attr[i];
+
+    t = g_strdup_printf ("subtitle-%d-language", i);
+    lang_code[0] = (u->lang_code >> 8) & 0xff;
+    lang_code[1] = u->lang_code & 0xff;
+    gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
+    g_free (t);
+
+    GST_DEBUG ("Subtitle stream %d is language %s", i, lang_code);
+  }
 
   return 0;
 }
@@ -1059,17 +1099,27 @@ dvdreadsrc_get (GstPad * pad)
             GST_FORMAT_UNDEFINED));
   }
 
+  if (priv->new_seek) {
+    _seek_title (priv, priv->title, priv->angle);
+    _seek_chapter (priv, priv->chapter);
+
+    priv->new_seek = FALSE;
+    priv->change_cell = TRUE;
+  }
+
+  if (priv->title_lang_event_pending) {
+    GstEvent *e = priv->title_lang_event_pending;
+
+    priv->title_lang_event_pending = NULL;
+    return GST_DATA (e);
+  }
+
   /* create the buffer */
   /* FIXME: should eventually use a bufferpool for this */
   buf = gst_buffer_new_and_alloc (1024 * DVD_VIDEO_LB_LEN);
 
-  if (priv->new_seek) {
-    _seek_title (priv, priv->title, priv->angle);
-    _seek_chapter (priv, priv->chapter);
-  }
-
   /* read it in from the file */
-  while ((res = _read (priv, priv->angle, priv->new_seek, buf)) == -3);
+  while ((res = _read (priv, priv->angle, priv->change_cell, buf)) == -3);
   switch (res) {
     case -1:
       GST_ELEMENT_ERROR (dvdreadsrc, RESOURCE, READ, (NULL), (NULL));
@@ -1085,7 +1135,7 @@ dvdreadsrc_get (GstPad * pad)
       g_assert_not_reached ();
   }
 
-  priv->new_seek = FALSE;
+  priv->change_cell = FALSE;
 
   return GST_DATA (buf);
 }
@@ -1139,11 +1189,16 @@ dvdreadsrc_change_state (GstElement * element)
     case GST_STATE_PAUSED_TO_READY:
       dvdreadsrc->priv->new_cell = TRUE;
       dvdreadsrc->priv->new_seek = TRUE;
+      dvdreadsrc->priv->change_cell = FALSE;
       dvdreadsrc->priv->chapter = 0;
       dvdreadsrc->priv->title = 0;
       dvdreadsrc->priv->flush_pend = FALSE;
       dvdreadsrc->priv->seek_pend = FALSE;
       dvdreadsrc->priv->seek_pend_fmt = GST_FORMAT_UNDEFINED;
+      if (dvdreadsrc->priv->title_lang_event_pending) {
+        gst_event_unref (dvdreadsrc->priv->title_lang_event_pending);
+        dvdreadsrc->priv->title_lang_event_pending = NULL;
+      }
       break;
     case GST_STATE_READY_TO_NULL:
       dvdreadsrc_close_file (DVDREADSRC (element));
