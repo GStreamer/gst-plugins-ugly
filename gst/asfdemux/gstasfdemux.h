@@ -53,7 +53,13 @@ typedef struct
   guint32 frag_offset;
   guint32 sequence;
   guint64 delay;
+  guint64 last_pts;
   GstBuffer *payload;
+
+  /* video-only */
+  gboolean fps_known;
+  GstBuffer *cache;
+  GstCaps *caps;
 } asf_stream_context;
 
 typedef enum {
@@ -78,15 +84,8 @@ struct _GstASFDemux {
 
 #define GST_ASF_DEMUX_NUM_VIDEO_PADS 16
 #define GST_ASF_DEMUX_NUM_AUDIO_PADS 32
-#define GST_ASF_DEMUX_NUM_STREAMS 23
+#define GST_ASF_DEMUX_NUM_STREAMS 32
 #define GST_ASF_DEMUX_NUM_STREAM_IDS 127
-
-  /* stream output pads */
-  GstPad *video_pad[GST_ASF_DEMUX_NUM_VIDEO_PADS];
-  gint64 video_PTS[GST_ASF_DEMUX_NUM_VIDEO_PADS];
-
-  GstPad *audio_pad[GST_ASF_DEMUX_NUM_AUDIO_PADS];
-  gint64 audio_PTS[GST_ASF_DEMUX_NUM_AUDIO_PADS];
 
   guint64  last_seek;
   gboolean restart;

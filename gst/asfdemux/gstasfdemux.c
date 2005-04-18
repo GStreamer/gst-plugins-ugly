@@ -66,7 +66,7 @@ static gboolean gst_asf_demux_add_video_stream (GstASFDemux * asf_demux,
 static gboolean gst_asf_demux_add_audio_stream (GstASFDemux * asf_demux,
     asf_stream_audio * audio, guint16 id);
 static gboolean gst_asf_demux_setup_pad (GstASFDemux * asf_demux,
-    GstPad * src_pad, GstCaps * caps, guint16 id);
+    GstPad * src_pad, GstCaps * caps, guint16 id, gboolean video);
 
 static GstElementStateReturn gst_asf_demux_change_state (GstElement * element);
 
@@ -145,8 +145,6 @@ gst_asf_demux_class_init (GstASFDemuxClass * klass)
 static void
 gst_asf_demux_init (GstASFDemux * asf_demux)
 {
-  guint i;
-
   asf_demux->sinkpad =
       gst_pad_new_from_template (gst_static_pad_template_get
       (&gst_asf_demux_sink_template), "sink");
@@ -155,16 +153,6 @@ gst_asf_demux_init (GstASFDemux * asf_demux)
   gst_element_set_loop_function (GST_ELEMENT (asf_demux), gst_asf_demux_loop);
 
   /* We should zero everything to be on the safe side */
-  for (i = 0; i < GST_ASF_DEMUX_NUM_VIDEO_PADS; i++) {
-    asf_demux->video_pad[i] = NULL;
-    asf_demux->video_PTS[i] = 0;
-  }
-
-  for (i = 0; i < GST_ASF_DEMUX_NUM_AUDIO_PADS; i++) {
-    asf_demux->audio_pad[i] = NULL;
-    asf_demux->audio_PTS[i] = 0;
-  }
-
   asf_demux->num_audio_streams = 0;
   asf_demux->num_video_streams = 0;
   asf_demux->num_streams = 0;
@@ -1463,8 +1451,12 @@ gst_asf_demux_process_chunk (GstASFDemux * asf_demux,
       GST_DEBUG ("New buffer is at: %p size: %u",
           GST_BUFFER_DATA (stream->payload), GST_BUFFER_SIZE (stream->payload));
 
+      if (asf_demux->pts >= stream->last_pts ||
+          !GST_CLOCK_TIME_IS_VALID (stream->last_pts))
+        stream->last_pts = asf_demux->pts;
+
       GST_BUFFER_TIMESTAMP (stream->payload) =
-          (GST_SECOND / 1000) * asf_demux->pts;
+          (GST_SECOND / 1000) * stream->last_pts;
 
       /*!!! Should handle flush events here? */
       GST_DEBUG ("Sending stream %d of size %d", stream->id,
@@ -1484,7 +1476,27 @@ gst_asf_demux_process_chunk (GstASFDemux * asf_demux,
 
         asf_demux->seek_discont = FALSE;
       }
-      gst_pad_push (stream->pad, GST_DATA (stream->payload));
+      if (!stream->fps_known) {
+        if (!stream->cache) {
+          stream->cache = stream->payload;
+        } else {
+          gdouble fps = (gdouble) GST_SECOND /
+              (GST_BUFFER_TIMESTAMP (stream->payload) -
+              GST_BUFFER_TIMESTAMP (stream->cache));
+
+          stream->fps_known = TRUE;
+          gst_caps_set_simple (stream->caps,
+              "framerate", G_TYPE_DOUBLE, fps, NULL);
+          GST_DEBUG ("Set-up stream with fps %lf", fps);
+          gst_pad_set_explicit_caps (stream->pad, stream->caps);
+
+          gst_pad_push (stream->pad, GST_DATA (stream->cache));
+          gst_pad_push (stream->pad, GST_DATA (stream->payload));
+          stream->cache = NULL;
+        }
+      } else {
+        gst_pad_push (stream->pad, GST_DATA (stream->payload));
+      }
     } else {
       gst_buffer_unref (stream->payload);
       stream->payload = NULL;
@@ -1690,7 +1702,6 @@ static GstElementStateReturn
 gst_asf_demux_change_state (GstElement * element)
 {
   GstASFDemux *asf_demux = GST_ASF_DEMUX (element);
-  gint i;
 
   switch (GST_STATE_TRANSITION (element)) {
     case GST_STATE_READY_TO_PAUSED:
@@ -1699,12 +1710,6 @@ gst_asf_demux_change_state (GstElement * element)
       break;
     case GST_STATE_PAUSED_TO_READY:
       gst_bytestream_destroy (asf_demux->bs);
-      for (i = 0; i < GST_ASF_DEMUX_NUM_VIDEO_PADS; i++) {
-        asf_demux->video_PTS[i] = 0;
-      }
-      for (i = 0; i < GST_ASF_DEMUX_NUM_AUDIO_PADS; i++) {
-        asf_demux->audio_PTS[i] = 0;
-      }
       if (asf_demux->taglist) {
         gst_tag_list_free (asf_demux->taglist);
         asf_demux->taglist = NULL;
@@ -1792,7 +1797,7 @@ gst_asf_demux_add_audio_stream (GstASFDemux * asf_demux,
 
   asf_demux->num_audio_streams++;
 
-  if (!gst_asf_demux_setup_pad (asf_demux, src_pad, caps, id))
+  if (!gst_asf_demux_setup_pad (asf_demux, src_pad, caps, id, FALSE))
     return FALSE;
 
   gst_pad_push (src_pad, GST_DATA (gst_event_new_tag (list)));
@@ -1828,7 +1833,6 @@ gst_asf_demux_add_video_stream (GstASFDemux * asf_demux,
   /* yes, asf_stream_video_format and gst_riff_strf_vids are the same */
   caps = gst_riff_create_video_caps_with_data (video->tag, NULL,
       (gst_riff_strf_vids *) video, extradata, NULL, &codec_name);
-  gst_caps_set_simple (caps, "framerate", G_TYPE_DOUBLE, 25.0, NULL);
   gst_tag_list_add (list, GST_TAG_MERGE_APPEND, GST_TAG_VIDEO_CODEC,
       codec_name, NULL);
   gst_element_found_tags (GST_ELEMENT (asf_demux), list);
@@ -1837,10 +1841,11 @@ gst_asf_demux_add_video_stream (GstASFDemux * asf_demux,
     gst_buffer_unref (extradata);
   GST_INFO ("Adding video stream %u codec " GST_FOURCC_FORMAT " (0x%08x)",
       asf_demux->num_video_streams, GST_FOURCC_ARGS (video->tag), video->tag);
+  gst_caps_set_simple (caps, "framerate", G_TYPE_DOUBLE, 25.0, NULL);
 
   asf_demux->num_video_streams++;
 
-  if (!gst_asf_demux_setup_pad (asf_demux, src_pad, caps, id))
+  if (!gst_asf_demux_setup_pad (asf_demux, src_pad, caps, id, TRUE))
     return FALSE;
 
   gst_pad_push (src_pad, GST_DATA (gst_event_new_tag (list)));
@@ -1851,7 +1856,7 @@ gst_asf_demux_add_video_stream (GstASFDemux * asf_demux,
 
 static gboolean
 gst_asf_demux_setup_pad (GstASFDemux * asf_demux,
-    GstPad * src_pad, GstCaps * caps, guint16 id)
+    GstPad * src_pad, GstCaps * caps, guint16 id, gboolean is_video)
 {
   asf_stream_context *stream;
 
@@ -1864,11 +1869,14 @@ gst_asf_demux_setup_pad (GstASFDemux * asf_demux,
   gst_pad_set_query_function (src_pad, gst_asf_demux_handle_src_query);
 
   stream = &asf_demux->stream[asf_demux->num_streams];
+  stream->caps = caps;
   stream->pad = src_pad;
   stream->id = id;
   stream->frag_offset = 0;
   stream->sequence = 0;
   stream->delay = 0LL;
+  stream->last_pts = GST_CLOCK_TIME_NONE;
+  stream->fps_known = !is_video;        /* bit hacky for audio */
 
   gst_pad_set_element_private (src_pad, stream);
 
