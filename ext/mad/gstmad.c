@@ -1491,6 +1491,8 @@ gst_mad_chain (GstPad * pad, GstData * _data)
           }
         }
 
+        GST_DEBUG ("Pushing buf with ts %" GST_TIME_FORMAT,
+            GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuffer)));
         gst_pad_push (mad->srcpad, GST_DATA (outbuffer));
       }
 
