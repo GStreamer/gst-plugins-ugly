@@ -98,7 +98,7 @@ typedef enum
 DVDNavSrcPauseMode;
 
 /* Interval of time to sleep during pauses. */
-#define DVDNAVSRC_PAUSE_INTERVAL (GST_SECOND / 10)
+#define DVDNAVSRC_PAUSE_INTERVAL (GST_SECOND / 30)
 
 /* The DVD domain types. */
 typedef enum
@@ -121,8 +121,10 @@ struct _DVDNavSrc
 
   /* Location */
   gchar *location;
+  gchar *last_uri;
 
   gboolean did_seek;
+  gboolean new_seek;
   gboolean need_flush;
 
   /* Timing */
@@ -397,8 +399,10 @@ dvdnavsrc_init (DVDNavSrc * src)
   gst_element_add_pad (GST_ELEMENT (src), src->srcpad);
 
   src->location = g_strdup ("/dev/dvd");
+  src->last_uri = NULL;
 
   src->did_seek = FALSE;
+  src->new_seek = FALSE;
   src->need_flush = FALSE;
 
   /* Pause mode is initially inactive. */
@@ -438,6 +442,8 @@ dvdnavsrc_finalize (GObject * object)
   if (src->cur_buf != NULL) {
     gst_buffer_unref (src->cur_buf);
   }
+
+  g_free (src->last_uri);
 }
 
 static gboolean
@@ -1289,24 +1295,15 @@ dvdnavsrc_loop (GstElement * element)
 
   g_return_if_fail (dvdnavsrc_is_open (src));
 
+  if (src->new_seek) {
+    dvdnavsrc_tca_seek (src, src->title, src->chapter, src->angle);
+    src->new_seek = FALSE;
+    return;
+  }
+
   /* Loop processing blocks until there is data to send. */
   send_data = NULL;
   while (send_data == NULL) {
-    if (src->pause_mode == DVDNAVSRC_PAUSE_OFF) {
-      if (src->did_seek) {
-        GstEvent *event;
-
-        src->did_seek = FALSE;
-        GST_INFO_OBJECT (src, "sending discont");
-
-        event = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
-
-        src->need_flush = FALSE;
-        gst_pad_push (src->srcpad, GST_DATA (event));
-        return;
-      }
-    }
-
     if (src->need_flush) {
       if (src->pause_mode != DVDNAVSRC_PAUSE_OFF) {
         DVDNAV_CALL (dvdnav_still_skip, (src->dvdnav), src);
@@ -1316,7 +1313,18 @@ dvdnavsrc_loop (GstElement * element)
       src->need_flush = FALSE;
       GST_INFO_OBJECT (src, "sending flush");
       gst_pad_push (src->srcpad, GST_DATA (gst_event_new_flush ()));
-      return;
+    }
+
+    if (src->pause_mode == DVDNAVSRC_PAUSE_OFF) {
+      if (src->did_seek) {
+        GstEvent *event;
+
+        src->did_seek = FALSE;
+        GST_INFO_OBJECT (src, "sending discont");
+
+        event = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
+        gst_pad_push (src->srcpad, GST_DATA (event));
+      }
     }
 
     if (src->cur_buf == NULL) {
@@ -1483,6 +1491,7 @@ dvdnavsrc_loop (GstElement * element)
         send_data = GST_DATA (dvdnavsrc_make_dvd_event (src,
                 "dvd-vts-change", "domain",
                 G_TYPE_INT, (gint) src->domain, NULL));
+
         src->did_seek = TRUE;
       }
         break;
@@ -1556,7 +1565,7 @@ dvdnavsrc_loop (GstElement * element)
 
         src->button = 0;
         src->pause_mode = DVDNAVSRC_PAUSE_OFF;
-        // src->did_seek = TRUE;
+        src->need_flush = TRUE;
         send_data = GST_DATA (gst_event_new_flush ());
         break;
 
@@ -2125,17 +2134,75 @@ dvdnavsrc_uri_get_protocols (void)
 static const gchar *
 dvdnavsrc_uri_get_uri (GstURIHandler * handler)
 {
-  return "dvdnav://";
+  DVDNavSrc *src = DVDNAVSRC (handler);
+
+  g_free (src->last_uri);
+  src->last_uri =
+      g_strdup_printf ("dvd://%d,%d,%d", src->title, src->chapter, src->angle);
+
+  return src->last_uri;
 }
 
 static gboolean
 dvdnavsrc_uri_set_uri (GstURIHandler * handler, const gchar * uri)
 {
+  DVDNavSrc *src = DVDNAVSRC (handler);
   gboolean ret;
   gchar *protocol = gst_uri_get_protocol (uri);
 
   ret = (protocol && !strcmp (protocol, "dvdnav")) ? TRUE : FALSE;
   g_free (protocol);
+  protocol = NULL;
+
+  if (!ret)
+    return ret;
+
+  /*
+   * Parse out the new t/c/a and seek to them
+   */
+  {
+    gchar *location = NULL;
+    gchar **strs;
+    gchar **strcur;
+    gint pos = 0;
+
+    location = gst_uri_get_location (uri);
+
+    if (!location)
+      return ret;
+
+    strcur = strs = g_strsplit (location, ",", 0);
+    while (strcur && *strcur) {
+      gint val;
+
+      if (!sscanf (*strcur, "%d", &val))
+        break;
+
+      switch (pos) {
+        case 0:
+          if (val != src->title) {
+            src->title = val;
+            src->new_seek = TRUE;
+          }
+          break;
+        case 1:
+          if (val != src->chapter) {
+            src->chapter = val;
+            src->new_seek = TRUE;
+          }
+          break;
+        case 2:
+          src->angle = val;
+          break;
+      }
+
+      strcur++;
+      pos++;
+    }
+
+    g_strfreev (strs);
+    g_free (location);
+  }
 
   return ret;
 }

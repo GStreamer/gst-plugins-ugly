@@ -74,6 +74,7 @@ struct _DVDReadSrcPrivate
   gboolean seek_pend, flush_pend;
   GstFormat seek_pend_fmt;
   GstEvent *title_lang_event_pending;
+  GstEvent *pending_clut_event;
 };
 
 GST_DEBUG_CATEGORY_STATIC (gstdvdreadsrc_debug);
@@ -125,7 +126,6 @@ static GstData *dvdreadsrc_get (GstPad * pad);
 static GstElementStateReturn dvdreadsrc_change_state (GstElement * element);
 
 static void dvdreadsrc_uri_handler_init (gpointer g_iface, gpointer iface_data);
-
 
 static GstElementClass *parent_class = NULL;
 
@@ -254,6 +254,7 @@ dvdreadsrc_init (DVDReadSrc * dvdreadsrc)
   dvdreadsrc->priv->flush_pend = FALSE;
   dvdreadsrc->priv->seek_pend_fmt = GST_FORMAT_UNDEFINED;
   dvdreadsrc->priv->title_lang_event_pending = NULL;
+  dvdreadsrc->priv->pending_clut_event = NULL;
 }
 
 static void
@@ -487,6 +488,30 @@ dvdreadsrc_srcpad_event (GstPad * pad, GstEvent * event)
   gst_event_unref (event);
 
   return res;
+}
+
+static GstEvent *
+dvdnavsrc_make_clut_change_event (DVDReadSrcPrivate * src, const guint * clut)
+{
+  GstEvent *event;
+  GstStructure *structure;
+  guchar name[16];
+  int i;
+
+  structure = gst_structure_new ("application/x-gst-dvd",
+      "event", G_TYPE_STRING, "dvd-spu-clut-change", NULL);
+
+  /* Create a separate field for each value in the table. */
+  for (i = 0; i < 16; i++) {
+    sprintf (name, "clut%02d", i);
+    gst_structure_set (structure, name, G_TYPE_INT, (int) clut[i], NULL);
+  }
+
+  /* Create the DVD event and put the structure into it. */
+  event = gst_event_new (GST_EVENT_ANY);
+  event->event_data.structure.structure = structure;
+
+  return event;
 }
 
 static GstClockTime
@@ -751,11 +776,13 @@ _seek_title (DVDReadSrcPrivate * priv, int title, int angle)
   for (i = 0; i < priv->vts_file->vtsi_mat->nr_of_vts_subp_streams; i++) {
     const subp_attr_t *u = &priv->vts_file->vtsi_mat->vts_subp_attr[i];
 
-    t = g_strdup_printf ("subtitle-%d-language", i);
-    lang_code[0] = (u->lang_code >> 8) & 0xff;
-    lang_code[1] = u->lang_code & 0xff;
-    gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
-    g_free (t);
+    if (u->type) {
+      t = g_strdup_printf ("subtitle-%d-language", i);
+      lang_code[0] = (u->lang_code >> 8) & 0xff;
+      lang_code[1] = u->lang_code & 0xff;
+      gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
+      g_free (t);
+    }
 
     GST_DEBUG ("Subtitle stream %d is language %s", i, lang_code);
   }
@@ -785,6 +812,7 @@ _seek_chapter (DVDReadSrcPrivate * priv, int chapter)
      */
   priv->pgc_id = priv->vts_ptt_srpt->title[priv->ttn - 1].ptt[chapter].pgcn;
   priv->pgn = priv->vts_ptt_srpt->title[priv->ttn - 1].ptt[chapter].pgn;
+
   priv->cur_pgc = priv->vts_file->vts_pgcit->pgci_srp[priv->pgc_id - 1].pgc;
   priv->start_cell = priv->cur_pgc->program_map[priv->pgn - 1] - 1;
 
@@ -825,6 +853,13 @@ _seek_chapter (DVDReadSrcPrivate * priv, int chapter)
   priv->next_cell = priv->start_cell;
 
   priv->chapter = chapter;
+
+  if (priv->pending_clut_event)
+    gst_event_unref (priv->pending_clut_event);
+
+  priv->pending_clut_event =
+      dvdnavsrc_make_clut_change_event (priv, priv->cur_pgc->palette);
+
   return 0;
 }
 
@@ -1113,6 +1148,13 @@ dvdreadsrc_get (GstPad * pad)
     return GST_DATA (e);
   }
 
+  if (priv->pending_clut_event) {
+    GstEvent *e = priv->pending_clut_event;
+
+    priv->pending_clut_event = NULL;
+    return GST_DATA (e);
+  }
+
   /* create the buffer */
   /* FIXME: should eventually use a bufferpool for this */
   buf = gst_buffer_new_and_alloc (1024 * DVD_VIDEO_LB_LEN);
@@ -1197,6 +1239,10 @@ dvdreadsrc_change_state (GstElement * element)
       if (dvdreadsrc->priv->title_lang_event_pending) {
         gst_event_unref (dvdreadsrc->priv->title_lang_event_pending);
         dvdreadsrc->priv->title_lang_event_pending = NULL;
+      }
+      if (dvdreadsrc->priv->pending_clut_event) {
+        gst_event_unref (dvdreadsrc->priv->pending_clut_event);
+        dvdreadsrc->priv->pending_clut_event = NULL;
       }
       break;
     case GST_STATE_READY_TO_NULL:
