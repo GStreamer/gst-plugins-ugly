@@ -1169,7 +1169,7 @@ gst_dvd_demux_sync_stream_to_time (GstMPEGDemux * mpeg_demux,
   if ((outpad != NULL) && (cur_nr == stream->number)) {
     if (GST_PAD_PEER (stream->pad)
         && gst_pad_query (GST_PAD_PEER (stream->pad), GST_QUERY_POSITION, &fmt,
-            &start_ts)) {
+            (gint64 *) & start_ts)) {
       if (start_ts < last_ts)
         filler =
             gst_event_new_filler_stamped (start_ts, GST_CLOCK_DIFF (last_ts,

@@ -1113,7 +1113,7 @@ gst_mpeg_demux_sync_stream_to_time (GstMPEGDemux * mpeg_demux,
 
   if (!GST_PAD_PEER (stream->pad)
       || !gst_pad_query (GST_PAD_PEER (stream->pad), GST_QUERY_POSITION, &fmt,
-          &start_ts)) {
+          (gint64 *) & start_ts)) {
     start_ts = stream->cur_ts;
   }
 
@@ -1214,7 +1214,7 @@ gst_mpeg_demux_handle_src_event (GstPad * pad, GstEvent * event)
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_SEEK:
     {
-      guint64 desired_offset;
+      gint64 desired_offset;
 
       if (mpeg_demux->index)
         res = index_seek (pad, event, &desired_offset);

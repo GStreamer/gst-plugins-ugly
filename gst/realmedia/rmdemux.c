@@ -693,7 +693,7 @@ re_get_pascal_string (guint8 * ptr)
   int length;
 
   length = ptr[0];
-  return g_strndup (ptr + 1, length);
+  return g_strndup ((char *) ptr + 1, length);
 }
 
 static int

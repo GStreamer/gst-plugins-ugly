@@ -587,7 +587,7 @@ gst_asf_demux_process_comment (GstASFDemux * asf_demux, guint64 * obj_size)
         goto fail;
 
       /* convert to UTF-8 */
-      utf8_comments[i] = g_convert (data, lengths[i],
+      utf8_comments[i] = g_convert ((char *) data, lengths[i],
           "UTF-8", "UTF-16LE", &in, &out, NULL);
 
       gst_bytestream_flush_fast (bs, lengths[i]);
@@ -657,13 +657,13 @@ IsVBR
 
 */
 
-  const guchar *tags[] = { GST_TAG_GENRE, GST_TAG_ALBUM, GST_TAG_ARTIST, GST_TAG_TRACK_NUMBER, GST_TAG_DATE, NULL };    // GST_TAG_COMPOSER
-  const guchar *tags_label[] = { "WM/Genre", "WM/AlbumTitle", "WM/AlbumArtist", "WM/TrackNumber", "WM/Year", NULL };    // "WM/Composer"
+  const gchar *tags[] = { GST_TAG_GENRE, GST_TAG_ALBUM, GST_TAG_ARTIST, GST_TAG_TRACK_NUMBER, GST_TAG_DATE, NULL };     // GST_TAG_COMPOSER
+  const gchar *tags_label[] = { "WM/Genre", "WM/AlbumTitle", "WM/AlbumArtist", "WM/TrackNumber", "WM/Year", NULL };     // "WM/Composer"
 
   GstTagList *taglist;
   GValue tag_value = { 0, };
   gboolean have_tags = FALSE;
-  guint8 *name = NULL;
+  char *name = NULL;
 
   GST_INFO ("Object is an extended content description.");
 
@@ -678,7 +678,8 @@ IsVBR
     guint16 datatype;
     guint16 value_length;
     guint8 *tmpname;
-    guint8 *tmpvalue, *value;
+    guint8 *tmpvalue;
+    char *value;
 
     /* Descriptor Name Length */
     if (!_read_uint16 (asf_demux, &name_length))

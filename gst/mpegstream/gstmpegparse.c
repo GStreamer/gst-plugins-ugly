@@ -325,7 +325,7 @@ gst_mpeg_parse_handle_discont (GstMPEGParse * mpeg_parse, GstEvent * event)
     gst_mpeg_parse_reset (mpeg_parse);
   }
 
-  if (gst_event_discont_get_value (event, GST_FORMAT_TIME, &time)
+  if (gst_event_discont_get_value (event, GST_FORMAT_TIME, (gint64 *) & time)
       && (GST_CLOCK_TIME_IS_VALID (time))) {
     GST_DEBUG_OBJECT (mpeg_parse, "forwarding discontinuity, time: %0.3fs",
         (double) time / GST_SECOND);
@@ -957,7 +957,7 @@ gst_mpeg_parse_get_src_event_masks (GstPad * pad)
 }
 
 static gboolean
-index_seek (GstPad * pad, GstEvent * event, guint64 * offset, gint64 * scr)
+index_seek (GstPad * pad, GstEvent * event, gint64 * offset, gint64 * scr)
 {
   GstIndexEntry *entry;
   GstMPEGParse *mpeg_parse = GST_MPEG_PARSE (gst_pad_get_parent (pad));
@@ -985,7 +985,7 @@ index_seek (GstPad * pad, GstEvent * event, guint64 * offset, gint64 * scr)
 }
 
 static gboolean
-normal_seek (GstPad * pad, GstEvent * event, guint64 * offset, gint64 * scr)
+normal_seek (GstPad * pad, GstEvent * event, gint64 * offset, gint64 * scr)
 {
   gboolean res;
   GstFormat format;
@@ -1017,8 +1017,8 @@ gst_mpeg_parse_handle_src_event (GstPad * pad, GstEvent * event)
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_SEEK:
     {
-      guint64 desired_offset;
-      guint64 expected_scr;
+      gint64 desired_offset;
+      gint64 expected_scr = 0;
 
       /* first to to use the index if we have one */
       if (mpeg_parse->index)

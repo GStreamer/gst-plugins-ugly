@@ -273,7 +273,7 @@ synaescope_coreGo (void)
 #define PEAKIFY(x) BOUND((x) - (x)*(255-(x))/255/2)
 
 static void
-synaescope32 ()
+synaescope32 (void)
 {
   unsigned char *outptr;
   guint32 colEq[256];
@@ -449,7 +449,7 @@ bitReverser (int i)
 }
 
 static void
-init_synaescope ()
+init_synaescope (void)
 {
   int i;
 
@@ -537,6 +537,6 @@ synaesthesia_update (gint16 data[2][512])
 }
 
 void
-synaesthesia_close ()
+synaesthesia_close (void)
 {
 }
