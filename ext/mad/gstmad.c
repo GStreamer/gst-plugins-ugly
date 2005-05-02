@@ -83,6 +83,7 @@ struct _GstMad
   gint index_id;
 
   gboolean check_for_xing;
+  gboolean xing_found;
 };
 
 struct _GstMadClass
@@ -365,6 +366,7 @@ gst_mad_init (GstMad * mad)
   mad->half = FALSE;
   mad->ignore_crc = TRUE;
   mad->check_for_xing = TRUE;
+  mad->xing_found = FALSE;
   GST_FLAG_SET (mad, GST_ELEMENT_EVENT_AWARE);
 }
 
@@ -865,10 +867,7 @@ G_STMT_START{							\
   CHECK_HEADER (layer, "layer");
   CHECK_HEADER (mode, "mode");
   CHECK_HEADER (emphasis, "emphasis");
-
-  if (header->bitrate != mad->header.bitrate || mad->new_header) {
-    mad->header.bitrate = header->bitrate;
-  }
+  CHECK_HEADER (bitrate, "bitrate");
   mad->new_header = FALSE;
 
   if (changed) {
@@ -887,11 +886,13 @@ G_STMT_START{							\
         GST_TAG_LAYER, mad->header.layer,
         GST_TAG_MODE, mode->value_nick,
         GST_TAG_EMPHASIS, emphasis->value_nick, NULL);
-    gst_element_found_tags (GST_ELEMENT (mad), list);
-    gst_tag_list_free (list);
+    if (!mad->xing_found) {
+      gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
+          GST_TAG_BITRATE, mad->header.bitrate, NULL);
+    }
+    gst_element_found_tags_for_pad (GST_ELEMENT (mad), mad->srcpad, 0, list);
   }
 #undef CHECK_HEADER
-
 }
 
 static void
@@ -1403,11 +1404,13 @@ gst_mad_chain (GstPad * pad, GstData * _data)
         /* Assume Xing headers can only be the first frame in a mp3 file */
         if (mpg123_parse_xing_header (&mad->frame.header,
                 mad->stream.this_frame, frame_len, &bitrate, &time)) {
+          mad->xing_found = TRUE;
           list = gst_tag_list_new ();
           gst_tag_list_add (list, GST_TAG_MERGE_REPLACE,
               GST_TAG_DURATION, (gint64) time * 1000 * 1000 * 1000,
               GST_TAG_BITRATE, bitrate, NULL);
-          gst_element_found_tags (GST_ELEMENT (mad), list);
+          gst_element_found_tags_for_pad (GST_ELEMENT (mad), mad->srcpad, 0,
+              list);
           if (GST_PAD_IS_USABLE (mad->srcpad)) {
             gst_pad_push (mad->srcpad, GST_DATA (gst_event_new_tag (list)));
           } else {
