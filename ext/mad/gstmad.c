@@ -849,7 +849,7 @@ gst_mad_update_info (GstMad * mad)
 G_STMT_START{							\
   if (mad->header.h1 != header->h1 || mad->new_header) {	\
     mad->header.h1 = header->h1;				\
-     changed = TRUE;						\
+    changed = TRUE;						\
   };								\
 } G_STMT_END
 
@@ -867,7 +867,7 @@ G_STMT_START{							\
   CHECK_HEADER (layer, "layer");
   CHECK_HEADER (mode, "mode");
   CHECK_HEADER (emphasis, "emphasis");
-  CHECK_HEADER (bitrate, "bitrate");
+  mad->header.bitrate = header->bitrate;
   mad->new_header = FALSE;
 
   if (changed) {
@@ -891,6 +891,7 @@ G_STMT_START{							\
           GST_TAG_BITRATE, mad->header.bitrate, NULL);
     }
     gst_element_found_tags_for_pad (GST_ELEMENT (mad), mad->srcpad, 0, list);
+    g_print ("New metadata\n");
   }
 #undef CHECK_HEADER
 }
