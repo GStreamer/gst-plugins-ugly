@@ -891,7 +891,6 @@ G_STMT_START{							\
           GST_TAG_BITRATE, mad->header.bitrate, NULL);
     }
     gst_element_found_tags_for_pad (GST_ELEMENT (mad), mad->srcpad, 0, list);
-    g_print ("New metadata\n");
   }
 #undef CHECK_HEADER
 }
