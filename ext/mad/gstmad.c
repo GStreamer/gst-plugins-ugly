@@ -1411,11 +1411,6 @@ gst_mad_chain (GstPad * pad, GstData * _data)
               GST_TAG_BITRATE, bitrate, NULL);
           gst_element_found_tags_for_pad (GST_ELEMENT (mad), mad->srcpad, 0,
               list);
-          if (GST_PAD_IS_USABLE (mad->srcpad)) {
-            gst_pad_push (mad->srcpad, GST_DATA (gst_event_new_tag (list)));
-          } else {
-            gst_tag_list_free (list);
-          }
         }
 
         mad->check_for_xing = FALSE;
