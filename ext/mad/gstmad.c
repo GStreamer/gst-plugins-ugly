@@ -918,7 +918,7 @@ gst_mad_handle_event (GstPad * pad, GstBuffer * buffer)
         if (gst_formats_contains (formats, GST_EVENT_DISCONT_OFFSET (event,
                     i).format)) {
           gint64 value = GST_EVENT_DISCONT_OFFSET (event, i).value;
-          gint64 time;
+          gint64 time, total_samples;
           GstFormat format;
           GstEvent *discont;
 
@@ -940,9 +940,10 @@ gst_mad_handle_event (GstPad * pad, GstBuffer * buffer)
            * that this doesn't happen anywhere so far). */
           format = GST_FORMAT_DEFAULT;
           if (!gst_pad_convert (mad->srcpad,
-                  GST_FORMAT_TIME, time, &format, &mad->total_samples)) {
+                  GST_FORMAT_TIME, time, &format, &total_samples)) {
             continue;
           }
+          mad->total_samples = total_samples;
 
           if (GST_PAD_IS_USABLE (mad->srcpad)) {
             discont = gst_event_new_discontinuous (FALSE, GST_FORMAT_TIME,
@@ -1251,7 +1252,7 @@ gst_mad_chain (GstPad * pad, GstData * _data)
   }
 
   /* handle data */
-  data = GST_BUFFER_DATA (buffer);
+  data = (gchar *) GST_BUFFER_DATA (buffer);
   size = GST_BUFFER_SIZE (buffer);
 
   /* process the incoming buffer in chunks of maximum MAD_BUFFER_MDLEN bytes;
@@ -1397,7 +1398,7 @@ gst_mad_chain (GstPad * pad, GstData * _data)
       }
 
       if (mad->check_for_xing) {
-        int bitrate, time;
+        int bitrate = 0, time = 0;
         GstTagList *list;
         int frame_len = mad->stream.next_frame - mad->stream.this_frame;
 
@@ -1434,9 +1435,11 @@ gst_mad_chain (GstPad * pad, GstData * _data)
         /* if we have a pending timestamp, we can use it now to calculate the sample offset */
         if (GST_CLOCK_TIME_IS_VALID (mad->last_ts)) {
           GstFormat format = GST_FORMAT_DEFAULT;
+          gint64 total_samples;
 
           gst_pad_convert (mad->srcpad, GST_FORMAT_TIME, mad->last_ts, &format,
-              &mad->total_samples);
+              &total_samples);
+          mad->total_samples = total_samples;
           mad->last_ts = GST_CLOCK_TIME_NONE;
         }
         time_offset =

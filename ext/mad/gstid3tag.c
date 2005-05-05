@@ -504,7 +504,7 @@ mad_id3_parse_latin1_string (const id3_ucs4_t * ucs4)
   const gchar *env;
   char *latin1, *ret = NULL;
 
-  latin1 = id3_ucs4_latin1duplicate (ucs4);
+  latin1 = (char *) id3_ucs4_latin1duplicate (ucs4);
   if (latin1 == NULL)
     return NULL;
 
@@ -567,14 +567,14 @@ mad_id3_parse_latin1_string (const id3_ucs4_t * ucs4)
   }
 
   free (latin1);
-  return ret;
+  return (id3_utf8_t *) ret;
 }
 
 static void
 mad_id3_parse_comment_frame (GstTagList * tlist, const struct id3_frame *frame)
 {
   const id3_ucs4_t *ucs4;
-  id3_utf8_t *utf8;
+  gchar *utf8;
 
   g_assert (frame->nfields >= 4);
 
@@ -583,9 +583,9 @@ mad_id3_parse_comment_frame (GstTagList * tlist, const struct id3_frame *frame)
 
   if (frame->fields[0].type == ID3_FIELD_TYPE_TEXTENCODING
       && frame->fields[0].number.value == ID3_FIELD_TEXTENCODING_ISO_8859_1) {
-    utf8 = mad_id3_parse_latin1_string (ucs4);
+    utf8 = (gchar *) mad_id3_parse_latin1_string (ucs4);
   } else {
-    utf8 = id3_ucs4_utf8duplicate (ucs4);
+    utf8 = (gchar *) id3_ucs4_utf8duplicate (ucs4);
   }
 
   if (utf8 == NULL)
@@ -609,8 +609,8 @@ gst_mad_id3_to_tag_list (const struct id3_tag * tag)
 {
   const struct id3_frame *frame;
   const id3_ucs4_t *ucs4;
-  id3_utf8_t *utf8;
   GstTagList *tag_list;
+  gchar *utf8;
   guint i = 0;
 
   tag_list = gst_tag_list_new ();
@@ -649,9 +649,9 @@ gst_mad_id3_to_tag_list (const struct id3_tag * tag)
 
       if (encfield->type == ID3_FIELD_TYPE_TEXTENCODING
           && encfield->number.value == ID3_FIELD_TEXTENCODING_ISO_8859_1) {
-        utf8 = mad_id3_parse_latin1_string (ucs4);
+        utf8 = (gchar *) mad_id3_parse_latin1_string (ucs4);
       } else {
-        utf8 = id3_ucs4_utf8duplicate (ucs4);
+        utf8 = (gchar *) id3_ucs4_utf8duplicate (ucs4);
       }
 
       if (utf8 == NULL)
@@ -866,7 +866,7 @@ gst_id3_tag_handle_event (GstPad * pad, GstEvent * event)
     case GST_EVENT_DISCONTINUOUS:
       switch (tag->state) {
         case GST_ID3_TAG_STATE_READING_V2_TAG:{
-          guint64 value;
+          gint64 value;
 
           if (gst_event_discont_get_value (event, GST_FORMAT_BYTES, &value) ||
               gst_event_discont_get_value (event, GST_FORMAT_DEFAULT, &value)) {

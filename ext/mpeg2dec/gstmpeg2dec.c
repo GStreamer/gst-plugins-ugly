@@ -981,7 +981,7 @@ gst_mpeg2dec_chain (GstPad * pad, GstData * _data)
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_DISCONTINUOUS:
       {
-        GstClockTime time;
+        gint64 time;
 
         if (!gst_event_discont_get_value (event, GST_FORMAT_TIME, &time)
             || !GST_CLOCK_TIME_IS_VALID (time)) {
