@@ -232,7 +232,7 @@ plugin_init (GstPlugin * plugin)
     return FALSE;
 
   return gst_element_register (plugin, "rmdemux",
-      GST_RANK_PRIMARY, GST_TYPE_RMDEMUX);
+      GST_RANK_NONE, GST_TYPE_RMDEMUX);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
