@@ -1257,7 +1257,7 @@ dvdnavsrc_make_clut_change_event (DVDNavSrc * src, const guint * clut)
 {
   GstEvent *event;
   GstStructure *structure;
-  guchar name[16];
+  gchar name[16];
   int i;
 
   structure = gst_structure_new ("application/x-gst-dvd",
