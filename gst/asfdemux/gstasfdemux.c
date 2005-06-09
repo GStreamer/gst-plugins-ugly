@@ -1485,6 +1485,12 @@ gst_asf_demux_process_chunk (GstASFDemux * asf_demux,
               (GST_BUFFER_TIMESTAMP (stream->payload) -
               GST_BUFFER_TIMESTAMP (stream->cache));
 
+          /* artificial cap */
+          if (fps > 50)
+            fps = 50;
+          else if (fps < 5)
+            fps = 5;
+
           stream->fps_known = TRUE;
           gst_caps_set_simple (stream->caps,
               "framerate", G_TYPE_DOUBLE, fps, NULL);
