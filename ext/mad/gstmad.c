@@ -1139,7 +1139,7 @@ static gboolean
 gst_mad_check_caps_reset (GstMad * mad)
 {
   guint nchannels;
-  guint rate;
+  guint rate, old_rate = mad->rate;
 
   nchannels = MAD_NCHANNELS (&mad->frame.header);
 
@@ -1196,6 +1196,11 @@ gst_mad_check_caps_reset (GstMad * mad)
       mad->caps_set = TRUE;     /* set back to FALSE on discont */
       mad->channels = nchannels;
       mad->rate = rate;
+
+      /* update sample count so we don't come up with crazy timestamps */
+      if (mad->total_samples && old_rate) {
+        mad->total_samples = mad->total_samples * rate / old_rate;
+      }
     } else {
       GST_ELEMENT_ERROR (mad, CORE, NEGOTIATION, (NULL),
           ("Failed to negotiate %d Hz, %d channels", rate, nchannels));
@@ -1442,9 +1447,8 @@ gst_mad_chain (GstPad * pad, GstData * _data)
           mad->total_samples = total_samples;
           mad->last_ts = GST_CLOCK_TIME_NONE;
         }
-        time_offset =
-            mad->total_samples * GST_SECOND / mad->frame.header.samplerate;
-        time_duration = (nsamples * GST_SECOND / mad->frame.header.samplerate);
+        time_offset = mad->total_samples * GST_SECOND / mad->rate;
+        time_duration = (nsamples * GST_SECOND / mad->rate);
       }
 
       if (mad->index) {
