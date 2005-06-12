@@ -268,12 +268,12 @@ gst_amrnbparse_loop (GstElement * element)
 
   /* init */
   if (amrnbparse->ts == 0 && data[0] == '#') {
-    if (!(data = gst_amrnbparse_reserve (amrnbparse, 6)))
+    if (!(data = gst_amrnbparse_reserve (amrnbparse, 7)))
       return;
-    if (!memcmp (data, "#!AMR", 5)) {
+    if (!memcmp (data, "#!AMR\n", 6)) {
       GST_LOG ("Found header");
-      gst_bytestream_flush_fast (amrnbparse->bs, 5);
-      data += 5;
+      gst_bytestream_flush_fast (amrnbparse->bs, 6);
+      data += 6;
     }
   }
 
