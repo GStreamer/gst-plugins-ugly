@@ -32,6 +32,9 @@
 #include <gst/gst-i18n-plugin.h>
 #include <gst/gst.h>
 
+#include <dvdread/dvd_reader.h>
+#include <dvdread/ifo_read.h>
+
 #include <dvdnav/dvdnav.h>
 #include <dvdnav/nav_print.h>
 
@@ -161,6 +164,11 @@ struct _DVDNavSrc
   GstClockTime cell_start;      /* Start of the current cell */
   GstClockTime pg_start;        /* Start of the current program
                                  * within the PGC */
+
+  gint cur_vts;                 /* Current VTS being read */
+  vmgi_mat_t vmgm_attr;         /* VMGM domain info */
+  GArray *vts_attrs;            /* Array of vts_attributes_t structures 
+                                   cached from the VMG ifo */
 };
 
 struct _DVDNavSrcClass
@@ -431,6 +439,9 @@ dvdnavsrc_init (DVDNavSrc * src)
   src->pgc_length = GST_CLOCK_TIME_NONE;
   src->cell_start = 0;
   src->pg_start = 0;
+
+  src->vts_attrs = NULL;
+  src->cur_vts = 0;
 }
 
 static void
@@ -444,6 +455,9 @@ dvdnavsrc_finalize (GObject * object)
   }
 
   g_free (src->last_uri);
+
+  if (src->vts_attrs)
+    g_array_free (src->vts_attrs, TRUE);
 }
 
 static gboolean
@@ -1285,6 +1299,148 @@ dvdnavsrc_make_clut_change_event (DVDNavSrc * src, const guint * clut)
   return event;
 }
 
+/* Use libdvdread to read and cache info from the IFO file about
+ * streams in each VTS
+ */
+static gboolean
+read_vts_info (DVDNavSrc * src)
+{
+  dvd_reader_t *dvdi;
+  ifo_handle_t *ifo;
+  gint i;
+  gint n_vts;
+
+  if (src->vts_attrs) {
+    g_array_free (src->vts_attrs, TRUE);
+    src->vts_attrs = NULL;
+  }
+
+  dvdi = DVDOpen (src->location);
+  if (!dvdi)
+    return FALSE;
+
+  ifo = ifoOpen (dvdi, 0);
+  if (!ifo) {
+    GST_ERROR ("Can't open VMG info");
+    return FALSE;
+  }
+  n_vts = ifo->vts_atrt->nr_of_vtss;
+  memcpy (&src->vmgm_attr, ifo->vmgi_mat, sizeof (vmgi_mat_t));
+  ifoClose (ifo);
+
+  GST_DEBUG ("Reading IFO info for %d VTSs", n_vts);
+  src->vts_attrs = g_array_sized_new (FALSE, TRUE, sizeof (vtsi_mat_t),
+      n_vts + 1);
+  if (!src->vts_attrs)
+    return FALSE;
+  g_array_set_size (src->vts_attrs, n_vts + 1);
+
+  for (i = 1; i <= n_vts; i++) {
+    ifo = ifoOpen (dvdi, i);
+    if (!ifo) {
+      GST_ERROR ("Can't open VTS %d", i);
+      return FALSE;
+    }
+
+    GST_DEBUG ("VTS %d, Menu has %d audio %d subpictures. "
+        "Title has %d and %d", i,
+        ifo->vtsi_mat->nr_of_vtsm_audio_streams,
+        ifo->vtsi_mat->nr_of_vtsm_subp_streams,
+        ifo->vtsi_mat->nr_of_vts_audio_streams,
+        ifo->vtsi_mat->nr_of_vts_subp_streams);
+
+    memcpy (&g_array_index (src->vts_attrs, vtsi_mat_t, i),
+        ifo->vtsi_mat, sizeof (vtsi_mat_t));
+
+    ifoClose (ifo);
+  }
+  DVDClose (dvdi);
+  return TRUE;
+}
+
+static GstEvent *
+dvdnav_build_titlelang_event (DVDNavSrc * src)
+{
+  vtsi_mat_t *vts_attr;
+  audio_attr_t *a_attrs;
+  subp_attr_t *s_attrs;
+  gint n_audio, n_subp;
+  GstEvent *e;
+  GstStructure *s;
+  gint i;
+  gchar lang_code[3] = { '\0', '\0', '\0' };
+  gchar *t;
+
+  if (src->vts_attrs == NULL || src->cur_vts >= src->vts_attrs->len) {
+    if (src->vts_attrs)
+      GST_ERROR ("No stream info for VTS %d (have %d)", src->cur_vts,
+          src->vts_attrs->len);
+    else
+      GST_ERROR ("No stream info");
+    return NULL;
+  }
+
+  if (src->domain == DVDNAVSRC_DOMAIN_VMGM) {
+    vts_attr = NULL;
+    a_attrs = &src->vmgm_attr.vmgm_audio_attr;
+    n_audio = MIN (1, src->vmgm_attr.nr_of_vmgm_audio_streams);
+    s_attrs = &src->vmgm_attr.vmgm_subp_attr;
+    n_subp = MIN (1, src->vmgm_attr.nr_of_vmgm_subp_streams);
+  } else {
+    vts_attr = &g_array_index (src->vts_attrs, vtsi_mat_t, src->cur_vts);
+    a_attrs = vts_attr->vts_audio_attr;
+    n_audio = vts_attr->nr_of_vts_audio_streams;
+    s_attrs = vts_attr->vts_subp_attr;
+    n_subp = vts_attr->nr_of_vts_subp_streams;
+  }
+
+  /* build event */
+  e = gst_event_new (GST_EVENT_ANY);
+  s = e->event_data.structure.structure =
+      gst_structure_new ("application/x-gst-event",
+      "event", G_TYPE_STRING, "dvd-lang-codes", NULL);
+
+  /* audio */
+  for (i = 0; i < n_audio; i++) {
+    const audio_attr_t *a = a_attrs + i;
+
+    t = g_strdup_printf ("audio-%d-format", i);
+    gst_structure_set (s, t, G_TYPE_INT, (int) a->audio_format, NULL);
+    g_free (t);
+
+    GST_DEBUG ("Audio stream %d is format %d", i, (int) a->audio_format);
+
+    if (a->lang_type) {
+      t = g_strdup_printf ("audio-%d-language", i);
+      lang_code[0] = (a->lang_code >> 8) & 0xff;
+      lang_code[1] = a->lang_code & 0xff;
+      gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
+      g_free (t);
+
+      GST_DEBUG ("Audio stream %d is language %s", i, lang_code);
+    } else
+      GST_DEBUG ("Audio stream %d - no language", i, lang_code);
+  }
+
+  /* subtitle */
+  for (i = 0; i < n_subp; i++) {
+    const subp_attr_t *u = s_attrs + i;
+
+    if (u->type) {
+      t = g_strdup_printf ("subtitle-%d-language", i);
+      lang_code[0] = (u->lang_code >> 8) & 0xff;
+      lang_code[1] = u->lang_code & 0xff;
+      gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
+      g_free (t);
+    }
+
+    GST_DEBUG ("Subtitle stream %d is language %s", i,
+        lang_code[0] ? lang_code : "NONE");
+  }
+
+  return e;
+}
+
 static void
 dvdnavsrc_loop (GstElement * element)
 {
@@ -1384,6 +1540,7 @@ dvdnavsrc_loop (GstElement * element)
 
           /* We are in pause mode. Make this element sleep for a
              fraction of a second. */
+#if 0
           if ((src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) &&
               (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end)) {
             gst_element_wait (GST_ELEMENT (src), src->pause_end);
@@ -1392,6 +1549,14 @@ dvdnavsrc_loop (GstElement * element)
                 current_time + DVDNAVSRC_PAUSE_INTERVAL);
             src->did_seek = TRUE;
           }
+#else
+          /* If pause isn't finished, discont because time isn't actually
+           * advancing */
+          if (!((src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) &&
+                  (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end))) {
+            src->did_seek = TRUE;
+          }
+#endif
 
           /* Send an empty event to keep the pipeline going. */
           event = gst_event_new_filler_stamped (GST_CLOCK_TIME_NONE,
@@ -1418,7 +1583,7 @@ dvdnavsrc_loop (GstElement * element)
       {
 #if 0
         GstEvent *event;
-#endif
+
         /* FIXME: We should really wait here until the fifos are
            empty, but I have no idea how to do that.  In the mean time,
            just clean the wait state. */
@@ -1426,6 +1591,7 @@ dvdnavsrc_loop (GstElement * element)
 
         gst_element_wait (GST_ELEMENT (src),
             gst_element_get_time (GST_ELEMENT (src)) + 1.5 * GST_SECOND);
+#endif
         DVDNAV_CALL (dvdnav_wait_skip, (src->dvdnav), src);
 
 #if 0
@@ -1486,13 +1652,33 @@ dvdnavsrc_loop (GstElement * element)
 
       case DVDNAV_VTS_CHANGE:
       {
+        GstEvent *e;
+        dvdnav_vts_change_event_t *event = (dvdnav_vts_change_event_t *) data;
+
         dvdnavsrc_set_domain (src);
+
+        if (src->domain == DVDNAVSRC_DOMAIN_VMGM)
+          src->cur_vts = 0;
+        else
+          src->cur_vts = event->new_vtsN;
 
         send_data = GST_DATA (dvdnavsrc_make_dvd_event (src,
                 "dvd-vts-change", "domain",
                 G_TYPE_INT, (gint) src->domain, NULL));
 
-        src->did_seek = TRUE;
+        e = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
+        gst_pad_push (src->srcpad, GST_DATA (e));
+
+        if (src->domain == DVDNAVSRC_DOMAIN_VTSM ||
+            src->domain == DVDNAVSRC_DOMAIN_VTS ||
+            src->domain == DVDNAVSRC_DOMAIN_VMGM) {
+          e = dvdnav_build_titlelang_event (src);
+          if (!e) {
+            GST_ELEMENT_ERROR (src, LIBRARY, FAILED,
+                (_("Invalid title information on DVD.")), GST_ERROR_SYSTEM);
+          }
+          gst_pad_push (src->srcpad, GST_DATA (e));
+        }
       }
         break;
 
@@ -1657,6 +1843,11 @@ dvdnavsrc_change_state (GstElement * element)
     case GST_STATE_NULL_TO_READY:
       break;
     case GST_STATE_READY_TO_PAUSED:
+      if (!read_vts_info (src)) {
+        GST_ELEMENT_ERROR (src, LIBRARY, FAILED,
+            (_("Could not read title information for DVD.")), GST_ERROR_SYSTEM);
+        return GST_STATE_FAILURE;
+      }
       if (!dvdnavsrc_is_open (src)) {
         if (!dvdnavsrc_open (src)) {
           return GST_STATE_FAILURE;
