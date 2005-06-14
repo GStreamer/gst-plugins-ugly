@@ -361,6 +361,16 @@ gst_dvd_demux_handle_dvd_event (GstDVDDemux * dvd_demux, GstEvent * event)
   }
 #endif
 
+  if (strcmp (gst_structure_get_name (structure), "application/x-gst-dvd") != 0) {
+    /* This isn't a DVD event. */
+    if (GST_EVENT_TIMESTAMP (event) != GST_CLOCK_TIME_NONE) {
+      GST_EVENT_TIMESTAMP (event) += mpeg_demux->adjust;
+    }
+    gst_pad_event_default (mpeg_parse->sinkpad, event);
+
+    return TRUE;
+  }
+
   if (strcmp (event_type, "dvd-audio-stream-change") == 0) {
     gint stream_nr;
 
@@ -590,11 +600,8 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
     str->type = GST_MPEG_DEMUX_AUDIO_UNKNOWN;
     g_free (name);
     add_pad = TRUE;
-
-    mpeg_demux->audio_stream[stream_nr] = str;
   } else {
-    /* This stream may have been created by a derived class, reset the
-       size. */
+    /* Stream size may have changed, reset it. */
     if (type != GST_DVD_DEMUX_AUDIO_LPCM) {
       str = g_renew (GstMPEGStream, str, 1);
     } else {
@@ -602,6 +609,8 @@ gst_dvd_demux_get_audio_stream (GstMPEGDemux * mpeg_demux,
       str = (GstMPEGStream *) lpcm_str;
     }
   }
+
+  mpeg_demux->audio_stream[stream_nr] = str;
 
   if (type != str->type ||
       (type == GST_DVD_DEMUX_AUDIO_LPCM &&
