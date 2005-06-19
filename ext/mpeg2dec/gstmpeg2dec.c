@@ -530,9 +530,15 @@ gst_mpeg2dec_alloc_buffer (GstMpeg2dec * mpeg2dec, gint64 offset)
   guint8 *buf[3], *out;
 
   if (mpeg2dec->format == MPEG2DEC_FORMAT_I422) {
-    outbuf =
-        gst_pad_alloc_buffer (mpeg2dec->srcpad, GST_BUFFER_OFFSET_NONE,
-        size * 2);
+    if (mpeg2dec->decoded_width > mpeg2dec->width ||
+        mpeg2dec->decoded_height > mpeg2dec->height) {
+      outbuf = gst_buffer_new_and_alloc (size * 2);
+      GST_BUFFER_SIZE (outbuf) = mpeg2dec->width * mpeg2dec->height * 2;
+    } else {
+      outbuf =
+          gst_pad_alloc_buffer (mpeg2dec->srcpad, GST_BUFFER_OFFSET_NONE,
+          size * 2);
+    }
 
     if (!outbuf) {
       GST_ELEMENT_ERROR (mpeg2dec, RESOURCE, FAILED, (NULL),
@@ -547,9 +553,15 @@ gst_mpeg2dec_alloc_buffer (GstMpeg2dec * mpeg2dec, gint64 offset)
     buf[2] = buf[1] + size / 2;
 
   } else {
-    outbuf =
-        gst_pad_alloc_buffer (mpeg2dec->srcpad, GST_BUFFER_OFFSET_NONE,
-        (size * 3) / 2);
+    if (mpeg2dec->decoded_width > mpeg2dec->width ||
+        mpeg2dec->decoded_height > mpeg2dec->height) {
+      outbuf = gst_buffer_new_and_alloc (size * 3 / 2);
+      GST_BUFFER_SIZE (outbuf) = mpeg2dec->width * mpeg2dec->height * 3 / 2;
+    } else {
+      outbuf =
+          gst_pad_alloc_buffer (mpeg2dec->srcpad, GST_BUFFER_OFFSET_NONE,
+          (size * 3) / 2);
+    }
 
     out = GST_BUFFER_DATA (outbuf);
 
