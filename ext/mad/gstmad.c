@@ -1447,8 +1447,8 @@ gst_mad_chain (GstPad * pad, GstData * _data)
           mad->total_samples = total_samples;
           mad->last_ts = GST_CLOCK_TIME_NONE;
         }
-        time_offset = mad->total_samples * GST_SECOND / mad->rate;
-        time_duration = (nsamples * GST_SECOND / mad->rate);
+        time_offset = mad->total_samples * (GST_SECOND / mad->rate);
+        time_duration = (nsamples * (GST_SECOND / mad->rate));
       }
 
       if (mad->index) {
