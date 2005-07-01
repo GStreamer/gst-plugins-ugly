@@ -113,6 +113,8 @@ struct _GstDVDDemux {
 				/* Subpicture output streams. */
 
   GstEvent *langcodes;
+
+  gboolean ignore_next_newmedia_discont;
 };
 
 

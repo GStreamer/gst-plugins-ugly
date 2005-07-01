@@ -1426,13 +1426,15 @@ dvdnav_build_titlelang_event (DVDNavSrc * src)
   for (i = 0; i < n_subp; i++) {
     const subp_attr_t *u = s_attrs + i;
 
+    t = g_strdup_printf ("subtitle-%d-language", i);
     if (u->type) {
-      t = g_strdup_printf ("subtitle-%d-language", i);
       lang_code[0] = (u->lang_code >> 8) & 0xff;
       lang_code[1] = u->lang_code & 0xff;
       gst_structure_set (s, t, G_TYPE_STRING, lang_code, NULL);
-      g_free (t);
+    } else {
+      gst_structure_set (s, t, G_TYPE_STRING, "MENU", NULL);
     }
+    g_free (t);
 
     GST_DEBUG ("Subtitle stream %d is language %s", i,
         lang_code[0] ? lang_code : "NONE");

@@ -309,6 +309,7 @@ gst_dvd_demux_init (GstDVDDemux * dvd_demux)
   }
 
   dvd_demux->langcodes = NULL;
+  dvd_demux->ignore_next_newmedia_discont = FALSE;
 }
 
 
@@ -361,7 +362,8 @@ gst_dvd_demux_handle_dvd_event (GstDVDDemux * dvd_demux, GstEvent * event)
   }
 #endif
 
-  if (strcmp (gst_structure_get_name (structure), "application/x-gst-dvd") != 0) {
+  if (!g_str_has_prefix (gst_structure_get_name (structure),
+          "application/x-gst")) {
     /* This isn't a DVD event. */
     if (GST_EVENT_TIMESTAMP (event) != GST_CLOCK_TIME_NONE) {
       GST_EVENT_TIMESTAMP (event) += mpeg_demux->adjust;
@@ -455,9 +457,85 @@ gst_dvd_demux_handle_dvd_event (GstDVDDemux * dvd_demux, GstEvent * event)
 
     gst_event_unref (event);
   } else if (!strcmp (event_type, "dvd-lang-codes")) {
+    gint num_substreams = 0, num_audstreams = 0, n;
+    GstStructure *s;
+    gchar *t;
+
+    /* reset */
     if (dvd_demux->langcodes)
       gst_event_unref (dvd_demux->langcodes);
+    PARSE_CLASS (dvd_demux)->handle_discont (mpeg_parse,
+        gst_event_new_discontinuous (TRUE, GST_FORMAT_UNDEFINED));
+
+    /* see what kind of streams we have */
     dvd_demux->langcodes = event;
+    s = event->event_data.structure.structure;
+
+    /* now create pads for each; first video */
+    n = 2;
+    DEMUX_CLASS (dvd_demux)->get_video_stream (mpeg_demux,
+        0, GST_MPEG_DEMUX_VIDEO_MPEG, &n);
+
+    /* audio */
+    for (n = 0;; n++) {
+      gint fmt, ifo = 0;
+
+      t = g_strdup_printf ("audio-%d-format", num_audstreams);
+      if (!gst_structure_get_int (s, t, &fmt)) {
+        g_free (t);
+        break;
+      }
+      g_free (t);
+      switch (fmt) {
+        case 0x0:              /* AC-3 */
+          fmt = GST_DVD_DEMUX_AUDIO_AC3;
+          break;
+        case 0x2:
+        case 0x3:              /* MPEG */
+          fmt = GST_MPEG_DEMUX_AUDIO_MPEG;
+          break;
+        case 0x4:
+          fmt = GST_DVD_DEMUX_AUDIO_LPCM;
+          break;
+        case 0x6:
+          fmt = GST_DVD_DEMUX_AUDIO_DTS;
+          break;
+        default:
+          fmt = GST_MPEG_DEMUX_AUDIO_UNKNOWN;
+          break;
+      }
+      DEMUX_CLASS (dvd_demux)->get_audio_stream (mpeg_demux,
+          num_audstreams++, fmt, &ifo);
+    }
+
+    /* subtitle */
+    for (;;) {
+      t = g_strdup_printf ("subtitle-%d-language", num_substreams);
+      if (!gst_structure_get_value (s, t)) {
+        g_free (t);
+        break;
+      }
+      g_free (t);
+      CLASS (dvd_demux)->get_subpicture_stream (mpeg_demux,
+          num_substreams++, GST_DVD_DEMUX_SUBP_DVD, NULL);
+    }
+    GST_DEBUG_OBJECT (dvd_demux,
+        "Created 1 video stream, %d audio streams and %d subpicture streams "
+        "based on DVD lang codes event; now signalling no-more-pads",
+        num_audstreams, num_substreams);
+
+    /* we know this will be all */
+    gst_element_no_more_pads (GST_ELEMENT (dvd_demux));
+    dvd_demux->ignore_next_newmedia_discont = TRUE;
+
+    /* Try to prevent the mpegparse infrastructure from doing timestamp
+       adjustment, and enable synchronising filler events. */
+    mpeg_parse->use_adjust = FALSE;
+    mpeg_parse->adjust = 0;
+
+    /* Keep video/audio/subtitle pads within 1/2 sec of the SCR */
+    mpeg_demux->max_gap = 0.5 * GST_SECOND;
+    mpeg_demux->max_gap_tolerance = 0.05 * GST_SECOND;
   } else {
     GST_DEBUG_OBJECT (dvd_demux, "dvddemux Forwarding DVD event %s to all pads",
         event_type);
@@ -512,7 +590,11 @@ gst_dvd_demux_handle_discont (GstMPEGParse * mpeg_parse, GstEvent * event)
   GstDVDDemux *dvd_demux = GST_DVD_DEMUX (mpeg_parse);
 
   if (GST_EVENT_DISCONT_NEW_MEDIA (event)) {
-    gst_dvd_demux_reset (dvd_demux);
+    /* HACK */
+    if (dvd_demux->ignore_next_newmedia_discont)
+      GST_EVENT_DISCONT_NEW_MEDIA (event) = FALSE;
+    else
+      gst_dvd_demux_reset (dvd_demux);
   }
 
   /* let parent handle and forward discont */
@@ -992,6 +1074,8 @@ gst_dvd_demux_send_subbuffer (GstMPEGDemux * mpeg_demux,
     dvd_demux->discont_time = GST_CLOCK_TIME_NONE;
   }
 
+  dvd_demux->ignore_next_newmedia_discont = FALSE;
+
   /* You never know what happens to a buffer when you send it.  Just
      in case, we keep a reference to the buffer during the execution
      of this function. */
@@ -1100,11 +1184,16 @@ static void
 gst_dvd_demux_reset (GstDVDDemux * dvd_demux)
 {
   int i;
-  GstMPEGDemux *mpeg_demux = GST_MPEG_DEMUX (dvd_demux);
+
+  //GstMPEGDemux *mpeg_demux = GST_MPEG_DEMUX (dvd_demux);
 
   GST_INFO ("Resetting the dvd demuxer");
   for (i = 0; i < GST_DVD_DEMUX_NUM_SUBPICTURE_STREAMS; i++) {
     if (dvd_demux->subpicture_stream[i]) {
+      if (GST_PAD_IS_USABLE (dvd_demux->subpicture_stream[i]->pad)) {
+        gst_pad_push (dvd_demux->subpicture_stream[i]->pad,
+            GST_DATA (gst_event_new (GST_EVENT_EOS)));
+      }
       gst_element_remove_pad (GST_ELEMENT (dvd_demux),
           dvd_demux->subpicture_stream[i]->pad);
       g_free (dvd_demux->subpicture_stream[i]);
@@ -1123,9 +1212,11 @@ gst_dvd_demux_reset (GstDVDDemux * dvd_demux)
 
   dvd_demux->discont_time = GST_CLOCK_TIME_NONE;
 
+#if 0
   /* Reset max_gap handling */
   mpeg_demux->max_gap = GST_CLOCK_TIME_NONE;
   mpeg_demux->max_gap_tolerance = GST_CLOCK_TIME_NONE;
+#endif
 }
 
 static void
@@ -1207,6 +1298,7 @@ gst_dvd_demux_change_state (GstElement * element)
         gst_event_unref (dvd_demux->langcodes);
         dvd_demux->langcodes = NULL;
       }
+      dvd_demux->ignore_next_newmedia_discont = FALSE;
       break;
     default:
       break;

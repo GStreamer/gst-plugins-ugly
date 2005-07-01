@@ -1278,6 +1278,10 @@ gst_mpeg_demux_reset (GstMPEGDemux * mpeg_demux)
   /* check get_audio/video_stream because it can be derivated */
   for (i = 0; i < GST_MPEG_DEMUX_NUM_VIDEO_STREAMS; i++)
     if (mpeg_demux->video_stream[i]) {
+      if (GST_PAD_IS_USABLE (mpeg_demux->video_stream[i]->pad)) {
+        gst_pad_push (mpeg_demux->video_stream[i]->pad,
+            GST_DATA (gst_event_new (GST_EVENT_EOS)));
+      }
       gst_element_remove_pad (GST_ELEMENT (mpeg_demux),
           mpeg_demux->video_stream[i]->pad);
       g_free (mpeg_demux->video_stream[i]);
@@ -1285,6 +1289,10 @@ gst_mpeg_demux_reset (GstMPEGDemux * mpeg_demux)
     }
   for (i = 0; i < GST_MPEG_DEMUX_NUM_AUDIO_STREAMS; i++)
     if (mpeg_demux->audio_stream[i]) {
+      if (GST_PAD_IS_USABLE (mpeg_demux->audio_stream[i]->pad)) {
+        gst_pad_push (mpeg_demux->audio_stream[i]->pad,
+            GST_DATA (gst_event_new (GST_EVENT_EOS)));
+      }
       gst_element_remove_pad (GST_ELEMENT (mpeg_demux),
           mpeg_demux->audio_stream[i]->pad);
       g_free (mpeg_demux->audio_stream[i]);
@@ -1292,6 +1300,10 @@ gst_mpeg_demux_reset (GstMPEGDemux * mpeg_demux)
     }
   for (i = 0; i < GST_MPEG_DEMUX_NUM_PRIVATE_STREAMS; i++)
     if (mpeg_demux->private_stream[i]) {
+      if (GST_PAD_IS_USABLE (mpeg_demux->private_stream[i]->pad)) {
+        gst_pad_push (mpeg_demux->private_stream[i]->pad,
+            GST_DATA (gst_event_new (GST_EVENT_EOS)));
+      }
       gst_element_remove_pad (GST_ELEMENT (mpeg_demux),
           mpeg_demux->private_stream[i]->pad);
       g_free (mpeg_demux->private_stream[i]);
