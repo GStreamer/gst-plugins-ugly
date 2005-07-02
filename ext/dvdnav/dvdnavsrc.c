@@ -126,8 +126,10 @@ struct _DVDNavSrc
   gchar *location;
   gchar *last_uri;
 
+  gint64 pending_offset;        /* Offset to use for next discont event */
   gboolean did_seek;
   gboolean new_seek;
+  gboolean seek_pending;
   gboolean need_flush;
 
   /* Timing */
@@ -135,8 +137,7 @@ struct _DVDNavSrc
 
   /* Pause handling */
   DVDNavSrcPauseMode pause_mode;        /* The current pause mode. */
-  GstClockTime pause_end;       /* The clock time for the end of the
-                                   pause. */
+  GstClockTime pause_remain;    /* Remaining duration of the pause */
 
   /* Highligh handling */
   int button;                   /* The currently highlighted button
@@ -263,7 +264,7 @@ static void dvdnavsrc_print_event (DVDNavSrc * src,
 #endif /* GST_DISABLE_GST_DEBUG */
 static void dvdnavsrc_update_streaminfo (DVDNavSrc * src);
 static void dvdnavsrc_set_domain (DVDNavSrc * src);
-static void dvdnavsrc_update_highlight (DVDNavSrc * src);
+static void dvdnavsrc_update_highlight (DVDNavSrc * src, gboolean force);
 static void dvdnavsrc_user_op (DVDNavSrc * src, int op);
 static GstElementStateReturn dvdnavsrc_change_state (GstElement * element);
 
@@ -409,8 +410,10 @@ dvdnavsrc_init (DVDNavSrc * src)
   src->location = g_strdup ("/dev/dvd");
   src->last_uri = NULL;
 
+  src->pending_offset = -1;
   src->did_seek = FALSE;
   src->new_seek = FALSE;
+  src->seek_pending = FALSE;
   src->need_flush = FALSE;
 
   /* Pause mode is initially inactive. */
@@ -860,7 +863,7 @@ dvdnavsrc_set_domain (DVDNavSrc * src)
  * necessary.
  */
 static void
-dvdnavsrc_update_highlight (DVDNavSrc * src)
+dvdnavsrc_update_highlight (DVDNavSrc * src, gboolean force)
 {
   int button = 0;
   pci_t *pci;
@@ -893,7 +896,7 @@ dvdnavsrc_update_highlight (DVDNavSrc * src)
   DVDNAV_CALL (dvdnav_get_highlight_area, (pci, button, 0, &area), src);
 
   /* Check if we have a new button number, or a new highlight region. */
-  if (button != src->button ||
+  if (button != src->button || force ||
       memcmp (&area, &(src->area), sizeof (dvdnav_highlight_area_t)) != 0) {
     memcpy (&(src->area), &area, sizeof (dvdnav_highlight_area_t));
 
@@ -1471,6 +1474,7 @@ dvdnavsrc_loop (GstElement * element)
       src->need_flush = FALSE;
       GST_INFO_OBJECT (src, "sending flush");
       gst_pad_push (src->srcpad, GST_DATA (gst_event_new_flush ()));
+      dvdnavsrc_update_highlight (src, TRUE);
     }
 
     if (src->pause_mode == DVDNAVSRC_PAUSE_OFF) {
@@ -1480,8 +1484,18 @@ dvdnavsrc_loop (GstElement * element)
         src->did_seek = FALSE;
         GST_INFO_OBJECT (src, "sending discont");
 
-        event = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
+        if (src->pending_offset != -1) {
+          event = gst_event_new_discontinuous (FALSE, GST_FORMAT_BYTES,
+              src->pending_offset, GST_FORMAT_UNDEFINED);
+          src->pending_offset = -1;
+        } else
+          event = gst_event_new_discontinuous (FALSE, GST_FORMAT_UNDEFINED);
+
         gst_pad_push (src->srcpad, GST_DATA (event));
+
+        /* Sent a discont, make sure to enable highlight */
+        src->button = 0;
+        dvdnavsrc_update_highlight (src, TRUE);
       }
     }
 
@@ -1509,7 +1523,6 @@ dvdnavsrc_loop (GstElement * element)
       case DVDNAV_STILL_FRAME:
       {
         dvdnav_still_event_t *info = (dvdnav_still_event_t *) data;
-        GstClockTime current_time = gst_element_get_time (GST_ELEMENT (src));
 
         if (src->pause_mode == DVDNAVSRC_PAUSE_OFF) {
           dvdnavsrc_print_event (src, data, event, len);
@@ -1518,12 +1531,13 @@ dvdnavsrc_loop (GstElement * element)
           if (info->length == 0xff) {
             GST_INFO_OBJECT (src, "starting unlimited pause");
             src->pause_mode = DVDNAVSRC_PAUSE_UNLIMITED;
+            src->pause_remain = -1;
           } else {
             src->pause_mode = DVDNAVSRC_PAUSE_LIMITED;
-            src->pause_end = current_time + info->length * GST_SECOND;
+            src->pause_remain = info->length * GST_SECOND;
             GST_INFO_OBJECT (src,
-                "starting limited pause: %d seconds at %llu until %llu",
-                info->length, current_time, src->pause_end);
+                "starting limited pause: %d seconds at %llu",
+                info->length, gst_element_get_time (GST_ELEMENT (src)));
           }
 
           /* For the moment, send the first empty event to let
@@ -1537,38 +1551,34 @@ dvdnavsrc_loop (GstElement * element)
         }
 
         if (src->pause_mode == DVDNAVSRC_PAUSE_UNLIMITED ||
-            current_time < src->pause_end) {
+            src->pause_remain > 0) {
           GstEvent *event;
 
-          /* We are in pause mode. Make this element sleep for a
-             fraction of a second. */
-#if 0
-          if ((src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) &&
-              (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end)) {
-            gst_element_wait (GST_ELEMENT (src), src->pause_end);
-          } else {
-            gst_element_wait (GST_ELEMENT (src),
-                current_time + DVDNAVSRC_PAUSE_INTERVAL);
-            src->did_seek = TRUE;
+          /* Send a filler event to keep the pipeline going */
+          event = gst_event_new_filler_stamped (GST_CLOCK_TIME_NONE,
+              MIN (src->pause_remain, DVDNAVSRC_PAUSE_INTERVAL));
+          send_data = GST_DATA (event);
+
+          GST_DEBUG_OBJECT (src,
+              "Pause mode %d, Sending filler at %" G_GUINT64_FORMAT
+              ", dur %" G_GINT64_FORMAT ", remain %" G_GINT64_FORMAT,
+              src->pause_mode, gst_element_get_time (GST_ELEMENT (src)),
+              MIN (src->pause_remain, DVDNAVSRC_PAUSE_INTERVAL),
+              src->pause_remain);
+
+          if (src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) {
+            if (src->pause_remain < DVDNAVSRC_PAUSE_INTERVAL)
+              src->pause_remain = 0;
+            else
+              src->pause_remain -= DVDNAVSRC_PAUSE_INTERVAL;
           }
-#else
+
           /* If pause isn't finished, discont because time isn't actually
            * advancing */
-          if (!((src->pause_mode == DVDNAVSRC_PAUSE_LIMITED) &&
-                  (current_time + DVDNAVSRC_PAUSE_INTERVAL > src->pause_end))) {
+          if (src->pause_mode == DVDNAVSRC_PAUSE_UNLIMITED ||
+              src->pause_remain > 0)
             src->did_seek = TRUE;
-          }
-#endif
 
-          /* Send an empty event to keep the pipeline going. */
-          event = gst_event_new_filler_stamped (GST_CLOCK_TIME_NONE,
-              DVDNAVSRC_PAUSE_INTERVAL);
-          GST_DEBUG_OBJECT (src,
-              "Pause mode %d, Sending filler at %llu, dur %lld\n",
-              src->pause_mode, gst_element_get_time (GST_ELEMENT (src)),
-              DVDNAVSRC_PAUSE_INTERVAL);
-
-          send_data = GST_DATA (event);
           break;
         } else {
           /* We reached the end of the pause. */
@@ -1640,7 +1650,7 @@ dvdnavsrc_loop (GstElement * element)
           }
         }
 
-        dvdnavsrc_update_highlight (src);
+        dvdnavsrc_update_highlight (src, FALSE);
 
         /* Send a dvd nav packet event. */
         send_data = GST_DATA (dvdnavsrc_make_dvd_nav_packet_event (src, pci));
@@ -1745,7 +1755,7 @@ dvdnavsrc_loop (GstElement * element)
       case DVDNAV_HIGHLIGHT:
         dvdnavsrc_print_event (src, data, event, len);
 
-        dvdnavsrc_update_highlight (src);
+        dvdnavsrc_update_highlight (src, FALSE);
         break;
 
       case DVDNAV_HOP_CHANNEL:
@@ -1754,7 +1764,7 @@ dvdnavsrc_loop (GstElement * element)
         src->button = 0;
         src->pause_mode = DVDNAVSRC_PAUSE_OFF;
         src->need_flush = TRUE;
-        send_data = GST_DATA (gst_event_new_flush ());
+        // send_data = GST_DATA (gst_event_new_flush ());
         break;
 
       default:
@@ -1763,6 +1773,7 @@ dvdnavsrc_loop (GstElement * element)
     }
   }
 
+  src->seek_pending = FALSE;
   gst_pad_push (src->srcpad, send_data);
 }
 
@@ -1783,6 +1794,12 @@ dvdnavsrc_open (DVDNavSrc * src)
   }
 
   GST_FLAG_SET (src, DVDNAVSRC_OPEN);
+
+  if (dvdnav_set_PGC_positioning_flag (src->dvdnav, 1) != DVDNAV_STATUS_OK) {
+    GST_ELEMENT_ERROR (src, LIBRARY, FAILED,
+        (_("Failed to set PGC based seeking.")), GST_ERROR_SYSTEM);
+    return FALSE;
+  }
 
   /* Read the first block before seeking to force a libdvdnav internal
    * call to vm_start, otherwise it ignores our seek position.
@@ -1958,7 +1975,7 @@ dvdnav_handle_navigation_event (DVDNavSrc * src, GstEvent * event)
     dvdnav_mouse_select (src->dvdnav,
         dvdnav_get_current_nav_pci (src->dvdnav), (int) x, (int) y);
 
-    dvdnavsrc_update_highlight (src);
+    dvdnavsrc_update_highlight (src, FALSE);
   } else if (strcmp (event_type, "mouse-button-release") == 0) {
     double x, y;
 
@@ -1993,9 +2010,17 @@ dvdnavsrc_event (GstPad * pad, GstEvent * event)
       int parts, part, new_part;
       int angles, angle, new_angle;
       int origin;
+      guint32 curoff, len;
 
       format = GST_EVENT_SEEK_FORMAT (event);
       offset = GST_EVENT_SEEK_OFFSET (event);
+
+      /* Disallow seek before the DVD VM has started or if we haven't finished a 
+       * previous seek yet */
+      if (dvdnav_get_position (src->dvdnav, &curoff, &len) != DVDNAV_STATUS_OK
+          || src->seek_pending)
+        goto error;
+
       GST_DEBUG_OBJECT (src, "Seeking to %lld, format %d, method %d\n", offset,
           format, GST_EVENT_SEEK_METHOD (event));
 
@@ -2004,12 +2029,15 @@ dvdnavsrc_event (GstPad * pad, GstEvent * event)
           switch (GST_EVENT_SEEK_METHOD (event)) {
             case GST_SEEK_METHOD_SET:
               origin = SEEK_SET;
+              src->pending_offset = offset;
               break;
             case GST_SEEK_METHOD_CUR:
               origin = SEEK_CUR;
+              src->pending_offset = curoff + offset;
               break;
             case GST_SEEK_METHOD_END:
               origin = SEEK_END;
+              src->pending_offset = len + offset;
               break;
             default:
               goto error;
@@ -2018,6 +2046,7 @@ dvdnavsrc_event (GstPad * pad, GstEvent * event)
                   origin) != DVDNAV_STATUS_OK) {
             goto error;
           }
+          break;
         default:
           if (format == sector_format) {
             switch (GST_EVENT_SEEK_METHOD (event)) {
@@ -2116,6 +2145,7 @@ dvdnavsrc_event (GstPad * pad, GstEvent * event)
           }
       }
       src->did_seek = TRUE;
+      src->seek_pending = TRUE;
       src->need_flush = GST_EVENT_SEEK_FLAGS (event) & GST_SEEK_FLAG_FLUSH;
       break;
     }
@@ -2242,7 +2272,7 @@ dvdnavsrc_query (GstPad * pad, GstQueryType type,
         if (dvdnav_get_position (src->dvdnav, &pos, &len) != DVDNAV_STATUS_OK) {
           res = FALSE;
         }
-        *value = len * DVD_SECTOR_SIZE;
+        *value = (gint64) (len) * DVD_SECTOR_SIZE;
       } else if (*format == title_format) {
         if (dvdnav_get_number_of_titles (src->dvdnav, &titles)
             != DVDNAV_STATUS_OK) {
@@ -2276,7 +2306,7 @@ dvdnavsrc_query (GstPad * pad, GstQueryType type,
         if (dvdnav_get_position (src->dvdnav, &pos, &len) != DVDNAV_STATUS_OK) {
           res = FALSE;
         }
-        *value = pos * DVD_SECTOR_SIZE;
+        *value = (gint64) (pos) * DVD_SECTOR_SIZE;
       } else if (*format == title_format) {
         if (dvdnav_current_title_info (src->dvdnav, &title, &part)
             != DVDNAV_STATUS_OK) {

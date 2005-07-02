@@ -295,6 +295,7 @@ gst_mpeg_parse_update_streaminfo (GstMPEGParse * mpeg_parse)
 static void
 gst_mpeg_parse_reset (GstMPEGParse * mpeg_parse)
 {
+  GST_DEBUG ("Resetting mpeg_parse");
   mpeg_parse->current_scr = 0;
   mpeg_parse->current_ts = 0;
   mpeg_parse->bytes_since_scr = 0;
@@ -768,9 +769,13 @@ gst_mpeg_parse_get_rate (GstMPEGParse * mpeg_parse, gint64 * rate)
       &&
       gst_pad_query (GST_PAD_PEER (mpeg_parse->sinkpad),
           GST_QUERY_TOTAL, &bytes_format, &total_bytes)
-      && total_time != 0) {
-    *rate = GST_SECOND * total_bytes / total_time;
-    return TRUE;
+      && total_time != 0 && total_bytes != 0) {
+    /* Use the funny calculation to avoid overflow of 64 bits */
+    *rate =
+        ((total_bytes * GST_USECOND) / total_time) * (GST_SECOND / GST_USECOND);
+
+    if (*rate > 0)
+      return TRUE;
   }
   *rate = 0;
 
@@ -1030,9 +1035,10 @@ gst_mpeg_parse_handle_src_event (GstPad * pad, GstEvent * event)
       if (!res)
         break;
 
-      GST_DEBUG ("sending seek to %" G_GINT64_FORMAT " expected SCR: %"
-          G_GUINT64_FORMAT " (%" G_GUINT64_FORMAT ")", desired_offset,
-          expected_scr, MPEGTIME_TO_GSTTIME (expected_scr));
+      GST_DEBUG ("from pad %s: sending seek to %" G_GINT64_FORMAT
+          " expected SCR: %" G_GUINT64_FORMAT " (%" G_GUINT64_FORMAT ")",
+          gst_object_get_name (GST_OBJECT (pad)), desired_offset, expected_scr,
+          MPEGTIME_TO_GSTTIME (expected_scr));
 
       if (gst_bytestream_seek (mpeg_parse->packetize->bs, desired_offset,
               GST_SEEK_METHOD_SET)) {
