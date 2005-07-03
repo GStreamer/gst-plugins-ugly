@@ -2349,7 +2349,7 @@ dvdnavsrc_uri_get_type (void)
 static gchar **
 dvdnavsrc_uri_get_protocols (void)
 {
-  static gchar *protocols[] = { "dvdnav", NULL };
+  static gchar *protocols[] = { "dvd", "dvdnav", NULL };
 
   return protocols;
 }
@@ -2373,7 +2373,9 @@ dvdnavsrc_uri_set_uri (GstURIHandler * handler, const gchar * uri)
   gboolean ret;
   gchar *protocol = gst_uri_get_protocol (uri);
 
-  ret = (protocol && !strcmp (protocol, "dvdnav")) ? TRUE : FALSE;
+  ret = (protocol &&
+      (!strcmp (protocol, "dvdnav") ||
+          !strcmp (protocol, "dvd"))) ? TRUE : FALSE;
   g_free (protocol);
   protocol = NULL;
 
@@ -2444,7 +2446,7 @@ dvdnavsrc_uri_handler_init (gpointer g_iface, gpointer iface_data)
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  if (!gst_element_register (plugin, "dvdnavsrc", GST_RANK_NONE,
+  if (!gst_element_register (plugin, "dvdnavsrc", GST_RANK_PRIMARY,
           GST_TYPE_DVDNAVSRC))
     return FALSE;
 
