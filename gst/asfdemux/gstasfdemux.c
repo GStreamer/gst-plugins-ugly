@@ -1579,9 +1579,9 @@ gst_asf_demux_loop (GstASFDemux * demux)
   }
 
   if (G_LIKELY (demux->speed_packets == 1)) {
-    /* FIXME: maybe we should just skip broken packets and error out only
-     * after a few broken packets in a row? */
-    if (G_UNLIKELY (!gst_asf_demux_parse_packet (demux, buf))) {
+    GstAsfDemuxParsePacketError err;
+    err = gst_asf_demux_parse_packet (demux, buf);
+    if (G_UNLIKELY (err != GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE)) {
       /* when we don't know when the data object ends, we should check
        * for a chained asf */
       if (demux->num_packets == 0) {
@@ -1593,7 +1593,13 @@ gst_asf_demux_loop (GstASFDemux * demux)
           return;
         }
       }
-      goto parse_error;
+      /* FIXME: We should tally up fatal errors and error out only
+       * after a few broken packets in a row? */
+
+      GST_INFO_OBJECT (demux, "Ignoring recoverable parse error");
+      gst_buffer_unref (buf);
+      ++demux->packet;
+      return;
     }
 
     flow = gst_asf_demux_push_complete_payloads (demux, FALSE);
@@ -1604,13 +1610,13 @@ gst_asf_demux_loop (GstASFDemux * demux)
     guint n;
     for (n = 0; n < demux->speed_packets; n++) {
       GstBuffer *sub;
+      GstAsfDemuxParsePacketError err;
 
       sub =
           gst_buffer_create_sub (buf, n * demux->packet_size,
           demux->packet_size);
-      /* FIXME: maybe we should just skip broken packets and error out only
-       * after a few broken packets in a row? */
-      if (G_UNLIKELY (!gst_asf_demux_parse_packet (demux, sub))) {
+      err = gst_asf_demux_parse_packet (demux, sub);
+      if (G_UNLIKELY (err != GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE)) {
         /* when we don't know when the data object ends, we should check
          * for a chained asf */
         if (demux->num_packets == 0) {
@@ -1623,12 +1629,17 @@ gst_asf_demux_loop (GstASFDemux * demux)
             return;
           }
         }
-        goto parse_error;
+        /* FIXME: We should tally up fatal errors and error out only
+         * after a few broken packets in a row? */
+
+        GST_INFO_OBJECT (demux, "Ignoring recoverable parse error");
+        flow = GST_FLOW_OK;
       }
 
       gst_buffer_unref (sub);
 
-      flow = gst_asf_demux_push_complete_payloads (demux, FALSE);
+      if (err == GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE)
+        flow = gst_asf_demux_push_complete_payloads (demux, FALSE);
 
       ++demux->packet;
 
@@ -1720,6 +1731,8 @@ read_failed:
     flow = GST_FLOW_UNEXPECTED;
     goto pause;
   }
+#if 0
+  /* See FIXMEs above */
 parse_error:
   {
     gst_buffer_unref (buf);
@@ -1729,6 +1742,7 @@ parse_error:
     flow = GST_FLOW_ERROR;
     goto pause;
   }
+#endif
 }
 
 #define GST_ASF_DEMUX_CHECK_HEADER_YES       0
@@ -1812,6 +1826,7 @@ gst_asf_demux_chain (GstPad * pad, GstBuffer * buf)
 
       while (gst_adapter_available (demux->adapter) >= data_size) {
         GstBuffer *buf;
+        GstAsfDemuxParsePacketError err;
 
         /* we don't know the length of the stream
          * check for a chained asf everytime */
@@ -1832,15 +1847,16 @@ gst_asf_demux_chain (GstPad * pad, GstBuffer * buf)
 
         buf = gst_adapter_take_buffer (demux->adapter, data_size);
 
-        /* FIXME: maybe we should just skip broken packets and error out only
+        /* FIXME: We should tally up fatal errors and error out only
          * after a few broken packets in a row? */
-        if (G_UNLIKELY (!gst_asf_demux_parse_packet (demux, buf))) {
-          GST_WARNING_OBJECT (demux, "Parse error");
-        }
+        err = gst_asf_demux_parse_packet (demux, buf);
 
         gst_buffer_unref (buf);
 
-        ret = gst_asf_demux_push_complete_payloads (demux, FALSE);
+        if (G_LIKELY (err == GST_ASF_DEMUX_PARSE_PACKET_ERROR_NONE))
+          ret = gst_asf_demux_push_complete_payloads (demux, FALSE);
+        else
+          GST_WARNING_OBJECT (demux, "Parse error");
 
         if (demux->packet >= 0)
           ++demux->packet;
