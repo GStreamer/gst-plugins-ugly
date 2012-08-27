@@ -633,7 +633,6 @@ handle_picture (GstMpeg2dec * mpeg2dec, const mpeg2_info_t * info,
       type_str = "B";
       break;
     default:
-      gst_video_codec_frame_ref (frame);
       gst_video_decoder_drop_frame (GST_VIDEO_DECODER (mpeg2dec), frame);
       GST_VIDEO_DECODER_ERROR (mpeg2dec, 1, STREAM, DECODE,
           ("decoding error"), ("Invalid picture type"), ret);
@@ -798,7 +797,6 @@ gst_mpeg2dec_handle_frame (GstVideoDecoder * decoder,
         if (ret == GST_FLOW_ERROR) {
           GST_VIDEO_DECODER_ERROR (decoder, 1, STREAM, DECODE,
               ("decoding error"), ("Bad sequence header"), ret);
-          gst_video_decoder_drop_frame (decoder, frame);
           gst_mpeg2dec_reset (decoder, 0);
           goto done;
         }
@@ -853,7 +851,6 @@ gst_mpeg2dec_handle_frame (GstVideoDecoder * decoder,
       default:
         GST_ERROR_OBJECT (mpeg2dec, "Unknown libmpeg2 state %d, FIXME", state);
         ret = GST_FLOW_OK;
-        gst_video_codec_frame_unref (frame);
         goto done;
     }
 
@@ -863,8 +860,6 @@ gst_mpeg2dec_handle_frame (GstVideoDecoder * decoder,
       break;
     }
   }
-
-  gst_video_codec_frame_unref (frame);
 
 done:
   return ret;
