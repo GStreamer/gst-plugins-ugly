@@ -24,7 +24,6 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include <gst/video/gstvideodecoder.h>
 #include <mpeg2.h>
 
 G_BEGIN_DECLS
@@ -54,7 +53,12 @@ typedef enum
 } DiscontState;
 
 struct _GstMpeg2dec {
-  GstVideoDecoder element;
+  GstElement     element;
+
+  /* pads */
+  GstPad        *sinkpad,
+                *srcpad,
+                *userdatapad;
 
   mpeg2dec_t    *decoder;
   const mpeg2_info_t *info;
@@ -62,26 +66,27 @@ struct _GstMpeg2dec {
   gboolean       closed;
   gboolean       have_fbuf;
 
-  /* Buffer lifetime management */
-  GList         *buffers;
+  /* buffer management */
+  guint          ip_bufpos;
+  GstBuffer     *ip_buffers[4];
+  GstBuffer     *b_buffer;
 
-  /* FIXME This should not be necessary. It is used to prevent image
-   * corruption when the parser does not behave the way it should.
-   * See https://bugzilla.gnome.org/show_bug.cgi?id=674238
-   */
   DiscontState   discont_state;
 
   /* the timestamp of the next frame */
   GstClockTime   next_time;
+  GstSegment     segment;
 
   /* video state */
-  GstVideoCodecState *input_state;
+  GstVideoFormat format;
   gint           width;
   gint           height;
   gint           decoded_width;
   gint           decoded_height;
   gint           pixel_width;
   gint           pixel_height;
+  gint           frame_rate_code;
+  gint64         total_frames;
   gint64         frame_period;
   gboolean       interlaced;
 
@@ -90,21 +95,35 @@ struct _GstMpeg2dec {
   gint           v_offs;
   guint8        *dummybuf[4];
 
+
   guint64        offset;
   gint           fps_n;
   gint           fps_d;
+  gboolean       need_sequence;
 
   GstIndex      *index;
   gint           index_id;
 
+  gint           error_count;
   gboolean       can_allocate_aligned;
+
+  /* QoS stuff */ /* with LOCK*/
+  gdouble        proportion;
+  GstClockTime   earliest_time;
+  guint64        processed;
+  guint64        dropped;
+
+  /* gather/decode queues for reverse playback */
+  GList *gather;
+  GList *decode;
+  GList *queued;
 
   /* whether we have a pixel aspect ratio from the sink caps */
   gboolean have_par;
 };
 
 struct _GstMpeg2decClass {
-  GstVideoDecoderClass parent_class;
+  GstElementClass parent_class;
 };
 
 GType gst_mpeg2dec_get_type(void);
