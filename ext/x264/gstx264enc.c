@@ -1361,7 +1361,7 @@ gst_x264_enc_set_src_caps (GstX264Enc * encoder, GstCaps * caps)
 
   state = gst_video_encoder_set_output_state (GST_VIDEO_ENCODER (encoder),
       outcaps, encoder->input_state);
-  GST_DEBUG ("here are the caps: %" GST_PTR_FORMAT, state->caps);
+  GST_DEBUG_OBJECT (encoder, "output caps: %" GST_PTR_FORMAT, state->caps);
   gst_video_codec_state_unref (state);
 
   return TRUE;
@@ -1379,7 +1379,8 @@ gst_x264_enc_set_latency (GstX264Enc * encoder)
     latency = gst_util_uint64_scale_ceil (GST_SECOND * info->fps_d,
         max_delayed_frames, info->fps_n);
 
-    GST_INFO ("Updating latency to %" GST_TIME_FORMAT " (%d frames)",
+    GST_INFO_OBJECT (encoder,
+        "Updating latency to %" GST_TIME_FORMAT " (%d frames)",
         GST_TIME_ARGS (latency), max_delayed_frames);
 
     gst_video_encoder_set_latency (GST_VIDEO_ENCODER (encoder), latency,
@@ -1679,7 +1680,7 @@ gst_x264_enc_encode_frame (GstX264Enc * encoder, x264_picture_t * pic_in,
 
   if (pic_in && input_frame) {
     if (GST_VIDEO_CODEC_FRAME_IS_FORCE_KEYFRAME (input_frame)) {
-      GST_INFO ("Forcing key frame");
+      GST_INFO_OBJECT (encoder, "Forcing key frame");
       if (encoder->intra_refresh)
         x264_encoder_intra_refresh (encoder->x264enc);
       else
@@ -1734,7 +1735,7 @@ gst_x264_enc_encode_frame (GstX264Enc * encoder, x264_picture_t * pic_in,
   frame->output_buffer = out_buf;
 
   if (pic_out.b_keyframe) {
-    GST_INFO ("Output keyframe");
+    GST_DEBUG_OBJECT (encoder, "Output keyframe");
     GST_VIDEO_CODEC_FRAME_SET_SYNC_POINT (frame);
   }
 
