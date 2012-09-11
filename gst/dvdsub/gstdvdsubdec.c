@@ -992,9 +992,11 @@ gst_dvd_sub_dec_sink_event (GstPad * pad, GstEvent * event)
       } else {
         /* not just an update ... */
 
+#if 0
         /* Turn off forced highlight display */
-        // dec->forced_display = 0;
-        // dec->current_button = 0;
+        dec->forced_display = 0;
+        dec->current_button = 0;
+#endif
         if (dec->partialbuf) {
           gst_buffer_unref (dec->partialbuf);
           dec->partialbuf = NULL;
