@@ -47,6 +47,7 @@ enum
   ARG_DEVICE,
   ARG_TITLE,
   ARG_CHAPTER,
+  ARG_STOP_AFTER_CHAPTER,
   ARG_ANGLE
 };
 
@@ -122,6 +123,7 @@ gst_dvd_read_src_init (GstDvdReadSrc * src)
   src->change_cell = FALSE;
   src->uri_title = 1;
   src->uri_chapter = 1;
+  src->uri_stop_after_chapter = 999;
   src->uri_angle = 1;
 
   src->title_lang_event_pending = NULL;
@@ -157,6 +159,11 @@ gst_dvd_read_src_class_init (GstDvdReadSrcClass * klass)
   g_object_class_install_property (G_OBJECT_CLASS (klass), ARG_TITLE,
       g_param_spec_int ("title", "title", "title",
           1, 999, 1, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (G_OBJECT_CLASS (klass),
+      ARG_STOP_AFTER_CHAPTER,
+      g_param_spec_int ("stop-after-chapter", "stop-after-chapter",
+          "stop-after-chapter", 1, 999, 999,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (G_OBJECT_CLASS (klass), ARG_CHAPTER,
       g_param_spec_int ("chapter", "chapter", "chapter",
           1, 999, 1, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
@@ -209,6 +216,7 @@ gst_dvd_read_src_start (GstBaseSrc * basesrc)
 
   src->title = src->uri_title - 1;
   src->chapter = src->uri_chapter - 1;
+  src->stop_after_chapter = src->uri_stop_after_chapter - 1;
   src->angle = src->uri_angle - 1;
 
   if (!gst_dvd_read_src_goto_title (src, src->title, src->angle))
@@ -772,6 +780,7 @@ again:
   if (src->cur_cell >= src->last_cell) {
     /* advance to next chapter */
     if (src->chapter == (src->num_chapters - 1) ||
+        (src->chapter >= src->stop_after_chapter) ||
         (seg->format == chapter_format && seg->stop != -1 &&
             src->chapter == (seg->stop - 1))) {
       GST_DEBUG_OBJECT (src, "end of chapter segment");
@@ -1051,6 +1060,14 @@ gst_dvd_read_src_set_property (GObject * object, guint prop_id,
         src->new_seek = TRUE;
       }
       break;
+    case ARG_STOP_AFTER_CHAPTER:
+      src->uri_stop_after_chapter = g_value_get_int (value);
+      src->stop_after_chapter = src->uri_stop_after_chapter - 1;
+      /*if (started) {
+         src->stop_after_chapter = src->uri_stop_after_chapter - 1;
+         src->new_seek = TRUE;
+         } */
+      break;
     case ARG_ANGLE:
       src->uri_angle = g_value_get_int (value);
       if (started) {
@@ -1082,6 +1099,9 @@ gst_dvd_read_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case ARG_CHAPTER:
       g_value_set_int (value, src->uri_chapter);
+      break;
+    case ARG_STOP_AFTER_CHAPTER:
+      g_value_set_int (value, src->uri_stop_after_chapter);
       break;
     case ARG_ANGLE:
       g_value_set_int (value, src->uri_angle);
@@ -1721,6 +1741,7 @@ gst_dvd_read_src_uri_set_uri (GstURIHandler * handler, const gchar * uri,
 
     src->uri_title = 1;
     src->uri_chapter = 1;
+    src->uri_stop_after_chapter = 999;
     src->uri_angle = 1;
 
     if (!location)
@@ -1758,6 +1779,7 @@ gst_dvd_read_src_uri_set_uri (GstURIHandler * handler, const gchar * uri,
     if (pos > 0 && GST_OBJECT_FLAG_IS_SET (src, GST_BASE_SRC_FLAG_STARTED)) {
       src->title = src->uri_title - 1;
       src->chapter = src->uri_chapter - 1;
+      src->stop_after_chapter = src->uri_stop_after_chapter - 1;
       src->angle = src->uri_angle - 1;
       src->new_seek = TRUE;
     }
