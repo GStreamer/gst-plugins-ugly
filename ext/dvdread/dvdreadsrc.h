@@ -56,10 +56,12 @@ struct _GstDvdReadSrc {
 
   gint             uri_title;     /* set via the URI handler or properties,  */
   gint             uri_chapter;   /* otherwise not touched; these values     */
+  gint             uri_stop_after_chapter;
   gint             uri_angle;     /* start from 1                            */
 
   gint             title;         /* current position while open, set to the */
   gint             chapter;       /* URI-set values in ::start(). these      */
+  gint             stop_after_chapter;
   gint             angle;         /* values start from 0                     */
 
   gint             start_cell, last_cell, cur_cell;
